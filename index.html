@@ -1,0 +1,1723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MCC Inventory</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F5F3EC;
+    --surface:#FFFFFF;
+    --surface-alt:#ECE8DB;
+    --ink:#20261F;
+    --ink-soft:#5C6459;
+    --ink-faint:#8A9083;
+    --border:#DCD6C4;
+    --teal:#2F6F5E;
+    --teal-dark:#1F4E42;
+    --teal-fill:#E1F2EC;
+    --amber:#B9812E;
+    --amber-fill:#FBEDD8;
+    --rust:#AE4C3B;
+    --rust-fill:#F8E4DF;
+    --shadow:0 1px 2px rgba(32,38,31,0.06);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  #app{
+    font-family:'Inter',sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    min-height:100vh;
+    display:flex;
+    line-height:1.45;
+  }
+  .mono{font-family:'JetBrains Mono',monospace;}
+  h1,h2,h3,.display{font-family:'Space Grotesk',sans-serif;font-weight:600;color:var(--ink);}
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;}
+
+  /* ---- Sidebar ---- */
+  #sidebar{
+    width:220px;flex-shrink:0;background:var(--surface-alt);
+    border-right:1px solid var(--border);
+    padding:24px 16px;display:flex;flex-direction:column;gap:4px;
+    position:sticky;top:0;height:100vh;
+  }
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;padding-left:4px;}
+  .brand-mark{width:30px;height:30px;border-radius:8px;background:var(--teal);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-family:'Space Grotesk';font-size:15px;flex-shrink:0;}
+  .brand-name{font-family:'Space Grotesk';font-weight:700;font-size:17px;letter-spacing:-0.01em;}
+  .nav-item{
+    display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;
+    cursor:pointer;color:var(--ink-soft);font-size:14px;font-weight:500;user-select:none;
+  }
+  .nav-item:hover{background:rgba(47,111,94,0.08);color:var(--ink);}
+  .nav-item.active{background:var(--teal);color:#fff;}
+  .nav-icon{width:16px;text-align:center;font-size:13px;}
+  .nav-spacer{flex:1;}
+  .sidebar-foot{font-size:11px;color:var(--ink-faint);padding-left:4px;}
+  .storage-meter-bar{height:5px;border-radius:3px;background:var(--surface-alt);overflow:hidden;margin-bottom:5px;}
+  .storage-meter-fill{height:100%;border-radius:3px;background:var(--teal);transition:width 0.3s;}
+  .storage-meter-fill.warn{background:var(--amber);}
+  .storage-meter-fill.danger{background:var(--rust);}
+  .storage-meter-label{font-size:10.5px;color:var(--ink-faint);line-height:1.4;}
+
+  /* ---- Sign-in gate ---- */
+  #auth-gate{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;}
+  .auth-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px 36px;max-width:400px;width:100%;text-align:center;box-shadow:0 12px 32px rgba(0,0,0,0.1);}
+  .auth-card .brand-mark{margin:0 auto 18px;width:44px;height:44px;font-size:20px;}
+  .auth-card h1{font-size:20px;margin:0 0 8px;}
+  .auth-card p{font-size:13.5px;color:var(--ink-soft);margin:0 0 24px;line-height:1.5;}
+  .auth-btn{width:100%;padding:12px;border-radius:10px;background:var(--teal);color:#fff;border:none;
+    font-size:14px;font-weight:600;cursor:pointer;font-family:'Inter';}
+  .auth-btn:hover{background:var(--teal-dark);}
+  .auth-btn:disabled{opacity:0.6;cursor:default;}
+  .auth-error{background:var(--rust-fill);color:#7A3527;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-top:14px;text-align:left;}
+  .conn-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-faint);padding-left:4px;margin-bottom:6px;}
+  .conn-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);flex-shrink:0;}
+  .conn-dot.offline{background:var(--rust);}
+  .sign-out-link{font-size:11px;color:var(--ink-faint);text-decoration:underline;cursor:pointer;padding-left:4px;}
+
+  /* ---- Main ---- */
+  #main{flex:1 1 0%;min-width:0;padding:28px 36px 60px;max-width:1180px;overflow-x:hidden;}
+  .topbar{display:flex;align-items:center;gap:16px;margin-bottom:22px;}
+  .page-title{font-size:22px;margin:0;}
+  .search-wrap{flex:1;max-width:420px;position:relative;margin-left:auto;}
+  .search-wrap input{
+    width:100%;padding:9px 12px 9px 32px;border-radius:8px;border:1px solid var(--border);
+    background:var(--surface);font-size:13.5px;font-family:'Inter';color:var(--ink);
+  }
+  .search-wrap input:focus{outline:none;border-color:var(--teal);}
+  .search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--ink-faint);font-size:13px;}
+  .btn{
+    border:1px solid var(--border);background:var(--surface);color:var(--ink);
+    padding:9px 14px;border-radius:8px;font-size:13.5px;font-weight:500;cursor:pointer;
+    font-family:'Inter';display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+  }
+  .btn:hover{border-color:var(--ink-faint);}
+  .btn-primary{background:var(--teal);border-color:var(--teal);color:#fff;}
+  .btn-primary:hover{background:var(--teal-dark);border-color:var(--teal-dark);}
+  .btn-danger{color:var(--rust);}
+  .btn-sm{padding:5px 10px;font-size:12.5px;border-radius:6px;}
+  .btn-ghost{border-color:transparent;background:transparent;}
+  .btn-ghost:hover{background:var(--surface-alt);}
+
+  /* ---- Cards / metrics ---- */
+  .grid{display:grid;gap:14px;min-width:0;}
+  .cols-4{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));}
+  .cols-3{grid-template-columns:repeat(auto-fit,minmax(190px,1fr));}
+  .grid>*{min-width:0;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);}
+  .metric-label{font-size:12px;color:var(--ink-soft);margin:0 0 6px;text-transform:uppercase;letter-spacing:0.04em;}
+  .metric-value{font-size:26px;font-family:'JetBrains Mono';font-weight:600;margin:0;}
+  .metric-value.rust{color:var(--rust);}
+  .metric-value.amber{color:var(--amber);}
+  .metric-value.teal{color:var(--teal);}
+
+  section{margin-bottom:30px;}
+  section h2{font-size:15px;margin:0 0 12px;color:var(--ink);}
+
+  /* ---- Table ---- */
+  table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+  table.wrap-card{box-shadow:var(--shadow);}
+  th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-soft);
+    padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface-alt);font-weight:600;}
+  td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13.5px;vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  tr.row-click{cursor:pointer;}
+  tr.row-click:hover td{background:var(--teal-fill);}
+  .num{font-family:'JetBrains Mono';font-size:13px;}
+  .muted{color:var(--ink-soft);}
+  .faint{color:var(--ink-faint);font-size:12.5px;}
+
+  /* ---- Tags / badges ---- */
+  .tag{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:100px;font-size:11.5px;font-weight:500;}
+  .tag-teal{background:var(--teal-fill);color:var(--teal-dark);}
+  .tag-amber{background:var(--amber-fill);color:#7A5518;}
+  .tag-rust{background:var(--rust-fill);color:#7A3527;}
+  .tag-gray{background:var(--surface-alt);color:var(--ink-soft);}
+  .tag-out{background:var(--ink);color:#fff;}
+
+  /* ---- Freshness bar ---- */
+  .fresh-wrap{display:flex;flex-direction:column;gap:3px;min-width:110px;}
+  .fresh-track{height:5px;border-radius:3px;background:var(--surface-alt);overflow:hidden;width:100%;}
+  .fresh-fill{height:100%;border-radius:3px;}
+  .fresh-label{font-size:11px;color:var(--ink-soft);}
+
+  /* ---- Photo thumbnails ---- */
+  .thumb{width:40px;height:40px;border-radius:8px;object-fit:cover;flex-shrink:0;background:var(--surface-alt);border:1px solid var(--border);}
+  .thumb-placeholder{width:40px;height:40px;border-radius:8px;background:var(--surface-alt);border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-size:15px;flex-shrink:0;font-family:'Space Grotesk';font-weight:600;}
+  .item-cell{display:flex;align-items:center;gap:10px;}
+  .photo-picker{display:flex;align-items:center;gap:14px;margin-bottom:14px;}
+  .photo-preview{width:84px;height:84px;border-radius:10px;object-fit:cover;background:var(--surface-alt);border:1px solid var(--border);}
+  .photo-preview-placeholder{width:84px;height:84px;border-radius:10px;background:var(--surface-alt);border:1px dashed var(--border);
+    display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-size:11px;text-align:center;padding:6px;}
+  .photo-buttons{display:flex;flex-direction:column;gap:6px;}
+  .file-btn{position:relative;display:inline-block;}
+  .file-btn .btn{pointer-events:none;width:100%;}
+  .file-btn input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;}
+
+  /* ---- Empty state ---- */
+  .empty{padding:44px 24px;text-align:center;border:1px dashed var(--border);border-radius:12px;background:var(--surface);}
+  .empty h3{margin:0 0 6px;font-size:16px;}
+  .empty p{margin:0 0 16px;color:var(--ink-soft);font-size:13.5px;}
+
+  /* ---- Location cards ---- */
+  .loc-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);cursor:pointer;}
+  .loc-card:hover{border-color:var(--teal);}
+  .loc-name{font-size:15px;font-weight:600;margin:0 0 2px;}
+  .loc-type{font-size:12px;color:var(--ink-soft);margin:0 0 12px;}
+  .loc-stats{display:flex;gap:14px;}
+  .loc-stat-num{font-family:'JetBrains Mono';font-size:16px;font-weight:600;}
+  .loc-stat-lab{font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.03em;}
+
+  /* ---- Modal ---- */
+  #toast-stack{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:80;
+    display:flex;flex-direction:column;gap:8px;align-items:center;max-width:92vw;pointer-events:none;}
+  .toast{background:var(--ink);color:#fff;padding:11px 18px;border-radius:9px;font-size:13px;line-height:1.4;
+    box-shadow:0 8px 20px rgba(0,0,0,0.28);max-width:440px;text-align:left;pointer-events:auto;
+    opacity:0;transform:translateY(8px);transition:opacity 0.25s,transform 0.25s;}
+  .toast.show{opacity:1;transform:translateY(0);}
+  .toast.warn{background:var(--rust);}
+
+  #modal-root{position:fixed;inset:0;z-index:50;display:none;align-items:flex-start;justify-content:center;
+    background:rgba(32,38,31,0.35);overflow-y:auto;padding:40px 20px;}
+  #modal-root.open{display:flex;}
+  .modal{background:var(--surface);border-radius:14px;width:100%;max-width:560px;padding:24px 26px 26px;
+    box-shadow:0 12px 32px rgba(0,0,0,0.18);}
+  .modal-wide{max-width:720px;}
+  .modal-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;}
+  .modal-title{font-size:18px;margin:0;}
+  .modal-close{cursor:pointer;color:var(--ink-faint);font-size:18px;background:none;border:none;padding:2px;}
+  .modal-close:hover{color:var(--ink);}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
+  .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
+  .field label{font-size:12px;font-weight:500;color:var(--ink-soft);}
+  .field input,.field select,.field textarea{
+    padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13.5px;font-family:'Inter';
+    background:var(--surface);color:var(--ink);
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--teal);}
+  .toggle-row{display:flex;gap:8px;margin-bottom:14px;}
+  .toggle-opt{flex:1;text-align:center;padding:9px;border:1px solid var(--border);border-radius:8px;
+    cursor:pointer;font-size:13px;font-weight:500;color:var(--ink-soft);}
+  .toggle-opt.active{border-color:var(--teal);background:var(--teal-fill);color:var(--teal-dark);}
+  .modal-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:18px;border-top:1px solid var(--border);padding-top:16px;}
+  .hint{font-size:11.5px;color:var(--ink-faint);margin-top:-6px;margin-bottom:12px;}
+
+  /* ---- Detail panel ---- */
+  .detail-section{margin-bottom:20px;}
+  .detail-label{font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-soft);margin:0 0 8px;}
+  .price-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
+  .price-stat{background:var(--surface-alt);border-radius:8px;padding:10px 12px;}
+  .price-stat-val{font-family:'JetBrains Mono';font-size:16px;font-weight:600;}
+  .price-stat-lab{font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;}
+
+  .filters{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+  .filters select{padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;background:var(--surface);color:var(--ink);}
+
+  @media (max-width:860px){
+    #sidebar{width:64px;padding:20px 8px;}
+    .brand-name,.nav-label{display:none;}
+    .storage-meter-label{display:none;}
+    .nav-item{justify-content:center;}
+    #main{padding:20px 16px 60px;}
+    .field-row{grid-template-columns:1fr;}
+    .price-stats{grid-template-columns:1fr;}
+    table.card-table thead{display:none;}
+    table.card-table, table.card-table tbody, table.card-table tr, table.card-table td{display:block;width:100%;}
+    table.card-table tr{margin-bottom:12px;border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--surface);box-shadow:var(--shadow);white-space:normal;}
+    table.card-table tr:last-child{margin-bottom:0;}
+    table.card-table td{border:none;padding:5px 0;display:flex;justify-content:space-between;align-items:center;font-size:13px;white-space:normal;gap:10px;}
+    table.card-table td[data-label]::before{content:attr(data-label);font-weight:600;color:var(--ink-soft);font-size:10.5px;text-transform:uppercase;letter-spacing:0.03em;flex-shrink:0;}
+    table.card-table td.card-title{display:block;padding:0 0 8px;margin-bottom:6px;border-bottom:1px solid var(--border);}
+    table.card-table td.card-action{justify-content:flex-end;padding-top:8px;border-top:1px solid var(--border);margin-top:2px;}
+  }
+</style>
+</head>
+<body>
+<div id="auth-gate">
+  <div class="auth-card">
+    <div class="brand-mark">M</div>
+    <h1>MCC Inventory</h1>
+    <p>Connect your Google Drive to load and save your inventory. Your data is stored as a file in your own Drive — nowhere else.</p>
+    <button class="auth-btn" id="google-signin-btn">Connect Google Drive</button>
+    <div id="auth-error-slot"></div>
+  </div>
+</div>
+<div id="app">
+  <div id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">M</div>
+      <div class="brand-name">MCC Inventory</div>
+    </div>
+    <div class="nav-item" data-nav="dashboard"><span class="nav-icon">&#9737;</span><span class="nav-label">Dashboard</span></div>
+    <div class="nav-item" data-nav="items"><span class="nav-icon">&#9776;</span><span class="nav-label">Items</span></div>
+    <div class="nav-item" data-nav="locations"><span class="nav-icon">&#9635;</span><span class="nav-label">Locations</span></div>
+    <div class="nav-item" data-nav="expired"><span class="nav-icon">&#9888;</span><span class="nav-label">Expired</span></div>
+    <div class="nav-item" data-nav="lowstock"><span class="nav-icon">&#9660;</span><span class="nav-label">Running Low</span></div>
+    <div class="nav-item" data-nav="outofstock"><span class="nav-icon">&#9723;</span><span class="nav-label">Out of Stock</span></div>
+    <div class="nav-item" data-nav="backup"><span class="nav-icon">&#8635;</span><span class="nav-label">Backup</span></div>
+    <div class="nav-spacer"></div>
+    <div class="sidebar-foot">
+      <div class="conn-status"><span class="conn-dot" id="conn-dot"></span><span id="conn-label">Connected to Drive</span></div>
+      <div class="sign-out-link" id="sign-out-link">Disconnect</div>
+    </div>
+  </div>
+  <div id="main"></div>
+</div>
+<div id="modal-root"></div>
+<div id="toast-stack"></div>
+
+<script>
+/* ============================= GOOGLE DRIVE CONFIG =============================
+   1. Go to console.cloud.google.com, create a project (or use an existing one).
+   2. Enable the "Google Drive API" under APIs & Services > Library.
+   3. Go to APIs & Services > Credentials > Create Credentials > OAuth client ID.
+      - Application type: Web application
+      - Authorized JavaScript origins: add the exact URL you're hosting this file at
+        (e.g. https://yourusername.github.io)
+   4. Configure the OAuth consent screen (External, add yourself as a test user
+      if it stays in "Testing" mode — that's fine for personal use).
+   5. Copy the Client ID below.
+================================================================================= */
+const GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_FILE_LOCATIONS = 'mcc-inventory-locations.json';
+const DRIVE_FILE_ITEMS = 'mcc-inventory-items.json';
+
+let driveAccessToken = null;
+let driveTokenExpiresAt = 0;
+let tokenClient = null;
+
+function saveTokenToLocalStorage(token, expiresInSec){
+  try{
+    localStorage.setItem('mcc_drive_token', JSON.stringify({ token, expiresAt: Date.now() + expiresInSec*1000 - 60000 }));
+  }catch(e){}
+}
+function loadTokenFromLocalStorage(){
+  try{
+    const raw = localStorage.getItem('mcc_drive_token');
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(parsed.expiresAt > Date.now()) return parsed;
+    return null;
+  }catch(e){ return null; }
+}
+function clearStoredToken(){
+  try{ localStorage.removeItem('mcc_drive_token'); }catch(e){}
+}
+
+function updateConnStatus(ok){
+  const dot = document.getElementById('conn-dot');
+  const label = document.getElementById('conn-label');
+  if(!dot || !label) return;
+  dot.classList.toggle('offline', !ok);
+  label.textContent = ok ? 'Connected to Drive' : 'Drive connection issue';
+}
+
+function showAuthGate(errorMsg){
+  document.getElementById('auth-gate').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  const slot = document.getElementById('auth-error-slot');
+  slot.innerHTML = errorMsg ? `<div class="auth-error">${escapeHTML(errorMsg)}</div>` : '';
+}
+function hideAuthGate(){
+  document.getElementById('auth-gate').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+}
+
+function initGoogleAuth(){
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: (resp)=>{
+      if(resp.error){
+        showAuthGate('Sign-in failed: ' + resp.error + '. Make sure this exact URL is added under Authorized JavaScript origins in your Google Cloud OAuth client.');
+        return;
+      }
+      driveAccessToken = resp.access_token;
+      driveTokenExpiresAt = Date.now() + (resp.expires_in*1000) - 60000;
+      saveTokenToLocalStorage(resp.access_token, resp.expires_in);
+      hideAuthGate();
+      updateConnStatus(true);
+      startApp();
+    }
+  });
+  document.getElementById('google-signin-btn').addEventListener('click', ()=>{
+    if(GOOGLE_CLIENT_ID.indexOf('YOUR_CLIENT_ID_HERE') !== -1){
+      showAuthGate('Google Client ID not configured yet. Open this file and set GOOGLE_CLIENT_ID near the top of the <script> section.');
+      return;
+    }
+    tokenClient.requestAccessToken({ prompt: driveAccessToken ? '' : 'consent' });
+  });
+  document.getElementById('sign-out-link').addEventListener('click', ()=>{
+    if(driveAccessToken){
+      google.accounts.oauth2.revoke(driveAccessToken, ()=>{});
+    }
+    driveAccessToken = null;
+    clearStoredToken();
+    showAuthGate();
+  });
+
+  // Try silent restore from a cached, still-valid token first.
+  const cached = loadTokenFromLocalStorage();
+  if(cached){
+    driveAccessToken = cached.token;
+    driveTokenExpiresAt = cached.expiresAt;
+    hideAuthGate();
+    updateConnStatus(true);
+    startApp();
+  } else {
+    showAuthGate();
+  }
+}
+
+async function ensureFreshToken(){
+  if(driveAccessToken && Date.now() < driveTokenExpiresAt) return true;
+  return new Promise((resolve)=>{
+    tokenClient.callback = (resp)=>{
+      if(resp.error){ updateConnStatus(false); resolve(false); return; }
+      driveAccessToken = resp.access_token;
+      driveTokenExpiresAt = Date.now() + (resp.expires_in*1000) - 60000;
+      saveTokenToLocalStorage(resp.access_token, resp.expires_in);
+      updateConnStatus(true);
+      resolve(true);
+    };
+    tokenClient.requestAccessToken({ prompt: '' });
+  });
+}
+
+/* ---- Drive file read/write, replacing window.storage.get/set ---- */
+async function driveFindFileId(name){
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name%3D%27${encodeURIComponent(name)}%27+and+trashed%3Dfalse&spaces=drive&fields=files(id,name)`,
+    { headers: { Authorization: `Bearer ${driveAccessToken}` } }
+  );
+  if(!res.ok) throw new Error('Drive list failed: ' + res.status);
+  const data = await res.json();
+  return (data.files && data.files.length) ? data.files[0].id : null;
+}
+async function driveReadFile(name){
+  await ensureFreshToken();
+  const id = await driveFindFileId(name);
+  if(!id) return null;
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, {
+    headers: { Authorization: `Bearer ${driveAccessToken}` }
+  });
+  if(!res.ok) throw new Error('Drive read failed: ' + res.status);
+  return await res.text();
+}
+async function driveWriteFile(name, content){
+  await ensureFreshToken();
+  const id = await driveFindFileId(name);
+  if(id){
+    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${driveAccessToken}`, 'Content-Type': 'application/json' },
+      body: content
+    });
+    if(!res.ok) throw new Error('Drive update failed: ' + res.status);
+  } else {
+    const boundary = 'mcc_boundary_7f3a9c';
+    const metadata = { name, mimeType: 'application/json' };
+    const body =
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+      `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n` +
+      `--${boundary}--`;
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${driveAccessToken}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body
+    });
+    if(!res.ok) throw new Error('Drive create failed: ' + res.status);
+  }
+}
+
+/* ============================= STATE ============================= */
+const state = {
+  locations: [],
+  items: [],
+  view: 'dashboard',
+  filter: { search:'', locationId:'', category:'', status:'', subcategory:'' },
+  loaded: false
+};
+
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2)+Date.now());
+const todayISO = () => new Date().toISOString().slice(0,10);
+const fmtDate = (iso) => iso ? new Date(iso+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : '—';
+const fmtMoney = (n) => '$' + Number(n).toFixed(2);
+
+/* ============================= PERSISTENCE (Google Drive) ============================= */
+async function loadData(){
+  let locFailed = false, itemsFailed = false;
+  try{
+    const locRaw = await driveReadFile(DRIVE_FILE_LOCATIONS);
+    state.locations = locRaw ? JSON.parse(locRaw) : [];
+  }catch(e){ console.error('load locations failed', e); state.locations = []; locFailed = true; }
+  try{
+    const itemsRaw = await driveReadFile(DRIVE_FILE_ITEMS);
+    state.items = itemsRaw ? JSON.parse(itemsRaw) : [];
+  }catch(e){ console.error('load items failed', e); state.items = []; itemsFailed = true; }
+  updateConnStatus(!(locFailed || itemsFailed));
+  if(itemsFailed || locFailed){
+    showAlertModal("Data didn't load", "Your saved data didn't load this time. This is expected once if you've genuinely never saved anything yet — but if you know you have saved data before, this means the app couldn't reach Google Drive right now (not that your data is gone). Check your connection and try reloading.");
+  }
+  // Migrate old single quantity/expirationDate items into the batches model.
+  state.items.forEach(it=>{
+    if(!it.batches){
+      it.batches = [{ id: uid(), quantity: (it.quantity!=null ? it.quantity : 0), expirationDate: it.expirationDate || null }];
+      delete it.quantity;
+      delete it.expirationDate;
+    }
+  });
+  state.loaded = true;
+}
+async function driveWriteWithRetry(name, content, attempts=3, delayMs=900){
+  let lastErr;
+  for(let i=0;i<attempts;i++){
+    try{
+      await driveWriteFile(name, content);
+      return true;
+    }catch(e){
+      lastErr = e;
+      if(i < attempts-1) await new Promise(r=>setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+async function saveLocations(){
+  try{
+    await driveWriteWithRetry(DRIVE_FILE_LOCATIONS, JSON.stringify(state.locations));
+    updateConnStatus(true);
+    return true;
+  }catch(e){
+    console.error('save locations failed', e);
+    updateConnStatus(false);
+    return false;
+  }
+}
+async function saveItems(){
+  const payload = JSON.stringify(state.items);
+  try{
+    await driveWriteWithRetry(DRIVE_FILE_ITEMS, payload);
+    updateConnStatus(true);
+    return true;
+  }catch(e){
+    console.error('save items failed', e);
+    updateConnStatus(false);
+    return false;
+  }
+}
+function warnIfSaveFailed(ok, what){
+  if(!ok) showToast(`Heads up: ${what} could not be saved right now (Drive connection issue). It'll look fine until you refresh, but isn't actually saved — try again shortly.`, {warn:true, duration:8000});
+}
+
+/* ============================= BACKUP / RESTORE ============================= */
+function exportBackup(includePhotos){
+  const items = includePhotos ? state.items : state.items.map(i=>{
+    const { photo, ...rest } = i;
+    return rest;
+  });
+  const payload = {
+    app: 'Larder',
+    exportedAt: new Date().toISOString(),
+    includesPhotos: !!includePhotos,
+    locations: state.locations,
+    items
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `larder-backup-${includePhotos?'full':'no-photos'}-${todayISO()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+  showToast(`Backup downloaded (${includePhotos?'with photos':'no photos'}).`, {duration:3500});
+}
+async function handleImportBackup(e){
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  let data;
+  try{
+    const text = await file.text();
+    data = JSON.parse(text);
+  }catch(err){
+    showAlertModal('Import failed', "Could not read that file — make sure it's a Larder backup JSON file.");
+    return;
+  }
+  if(!data || !Array.isArray(data.locations) || !Array.isArray(data.items)){
+    showAlertModal('Import failed', "That file doesn't look like a valid Larder backup (missing locations/items).");
+    return;
+  }
+  const when = data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'an unknown time';
+  const photoNote = data.includesPhotos===false ? '<br><span class="faint">This backup does not include photos.</span>' : '';
+  showConfirmModal(
+    'Restore from backup?',
+    `This will <strong>replace everything</strong> currently in the app with this backup:<br>
+     ${data.items.length} items, ${data.locations.length} locations<br>
+     Backed up: ${escapeHTML(when)}${photoNote}<br><br>
+     <span class="faint">This cannot be undone.</span>`,
+    'Replace my data',
+    async ()=>{
+      closeModal();
+      state.locations = data.locations;
+      state.items = data.items;
+      const locOk = await saveLocations();
+      const itemsOk = await saveItems();
+      renderMain();
+      if(locOk && itemsOk){
+        showAlertModal('Restore complete', 'Your backup was restored and saved successfully.');
+      } else {
+        showAlertModal('Restore loaded, but not saved', 'Your backup loaded into the app, but saving to storage failed right now — it looks correct on screen but may not be persisted yet. Try again shortly, or re-import this same file if it disappears after a refresh.');
+      }
+    }
+  );
+}
+
+/* ============================= EXPIRY ESTIMATES ============================= */
+const EXPIRY_DAYS = {
+  food: {
+    'Fruits': 7,
+    'Vegetables': 7,
+    'Milk/Cheese/Yoghurt': 14,
+    'Breakfast (e.g. Bread, Cereal)': 14,
+    'Spreads': 180,
+    'Fresh Protein': 4,
+    'Frozen Protein': 180,
+    'Frozen Meals': 270,
+    'Desserts': 14,
+    'Canned Food': 730,
+    'Drinks': 270,
+    'Condiments, Seasoning & Sauces': 180,
+    'Snacks': 120,
+    'Alcohol': 365,
+    'Chocolates & Sweets': 180,
+    'Baking Supplies': 365,
+    'Instant Food': 365,
+    'Coffee/Tea': 270
+  },
+  nonfood: {
+    'Medicine': 365,
+    'Supplements': 365,
+    'Medical': 730,
+    'Storage': null,
+    'Skincare': 365,
+    'Cleaning Supplies': 730,
+    'Toiletries': 730,
+    'Electrical': null,
+    'Soaps/Shampoos/Facial Wash': 730,
+    'Soaps/Shampoos/Facial Wash': 730
+  }
+};
+function subcategoryOptions(isFood){ return Object.keys(isFood ? EXPIRY_DAYS.food : EXPIRY_DAYS.nonfood); }
+function estimateExpiry(isFood, subcategory, fromISO){
+  const table = isFood ? EXPIRY_DAYS.food : EXPIRY_DAYS.nonfood;
+  const days = table[subcategory];
+  if(days === undefined || days === null) return null;
+  const base = fromISO ? new Date(fromISO+'T00:00:00') : new Date();
+  base.setDate(base.getDate() + days);
+  return base.toISOString().slice(0,10);
+}
+function daysUntil(iso){
+  if(!iso) return null;
+  const now = new Date(); now.setHours(0,0,0,0);
+  const exp = new Date(iso+'T00:00:00');
+  return Math.round((exp-now)/86400000);
+}
+function freshnessInfo(iso){
+  if(!iso) return { pct:100, color:'var(--ink-faint)', label:'No expiry tracked', tag:'gray' };
+  const d = daysUntil(iso);
+  if(d < 0) return { pct:100, color:'var(--rust)', label:`Expired ${Math.abs(d)}d ago`, tag:'rust' };
+  if(d <= 3) return { pct: Math.max(8,100-d*10), color:'var(--rust)', label:`${d}d left`, tag:'rust' };
+  if(d <= 7) return { pct: 60, color:'var(--amber)', label:`${d}d left`, tag:'amber' };
+  const pct = Math.max(15, 100 - Math.min(d,60));
+  return { pct, color:'var(--teal)', label:`${d}d left`, tag:'teal' };
+}
+
+/* ============================= PHOTOS ============================= */
+function compressImage(file, maxDim=360, quality=0.5){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let { width, height } = img;
+        if(width > height){ if(width > maxDim){ height = Math.round(height * maxDim/width); width = maxDim; } }
+        else { if(height > maxDim){ width = Math.round(width * maxDim/height); height = maxDim; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = ()=> reject(new Error('Could not read image'));
+      img.src = e.target.result;
+    };
+    reader.onerror = ()=> reject(new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
+}
+function thumbHTML(item){
+  if(item.photo) return `<img class="thumb" src="${item.photo}" alt="">`;
+  const initial = (item.name||'?').trim().charAt(0).toUpperCase();
+  return `<div class="thumb-placeholder">${initial}</div>`;
+}
+
+/* ============================= PRICE STATS ============================= */
+function priceStats(item){
+  const p = item.purchases || [];
+  if(!p.length) return null;
+  const unitPrices = p.map(x => x.price / (x.qty || 1));
+  const avg = unitPrices.reduce((a,b)=>a+b,0)/unitPrices.length;
+  let minIdx = 0;
+  unitPrices.forEach((v,i)=>{ if(v < unitPrices[minIdx]) minIdx = i; });
+  const sorted = [...p].sort((a,b)=> new Date(b.date)-new Date(a.date));
+  const latestUnit = sorted[0].price / (sorted[0].qty||1);
+  return {
+    avg, min: unitPrices[minIdx], minStore: p[minIdx].store, minDate: p[minIdx].date,
+    latest: latestUnit, latestStore: sorted[0].store, count: p.length
+  };
+}
+
+/* ============================= LOCATIONS / ITEMS HELPERS ============================= */
+function locationById(id){ return state.locations.find(l=>l.id===id); }
+function itemsInLocation(id){ return state.items.filter(i=>i.locationId===id); }
+function itemTotalQty(item){
+  return (item.batches||[]).reduce((s,b)=> s + (Number(b.quantity)||0), 0);
+}
+function itemEarliestBatch(item){
+  const batches = item.batches || [];
+  if(!batches.length) return null;
+  const dated = batches.filter(b=>b.expirationDate);
+  if(!dated.length) return batches[0];
+  return dated.reduce((a,b)=> daysUntil(a.expirationDate) <= daysUntil(b.expirationDate) ? a : b);
+}
+function itemFreshness(item){
+  const eb = itemEarliestBatch(item);
+  return freshnessInfo(eb ? eb.expirationDate : null);
+}
+function allBatchPairs(items){
+  const out = [];
+  items.forEach(it=> (it.batches||[]).forEach(b=> out.push({ item: it, batch: b })));
+  return out;
+}
+function expiringSoonCount(items, days=7){
+  return allBatchPairs(items).filter(({batch})=>{ const d=daysUntil(batch.expirationDate); return d!==null && d<=days; }).length;
+}
+function expiredCount(items){
+  return allBatchPairs(items).filter(({batch})=>{ const d=daysUntil(batch.expirationDate); return d!==null && d<0; }).length;
+}
+
+/* ============================= RENDER: SHELL ============================= */
+function setActiveNav(){
+  document.querySelectorAll('.nav-item').forEach(el=>{
+    el.classList.toggle('active', el.dataset.nav === state.view);
+  });
+}
+function switchView(view){
+  state.view = view;
+  setActiveNav();
+  renderMain();
+}
+document.querySelectorAll('.nav-item').forEach(el=>{
+  el.addEventListener('click', ()=> switchView(el.dataset.nav));
+});
+
+function renderMain(){
+  const main = document.getElementById('main');
+  if(state.view==='dashboard') main.innerHTML = dashboardHTML();
+  else if(state.view==='items') main.innerHTML = itemsViewHTML();
+  else if(state.view==='locations') main.innerHTML = locationsViewHTML();
+  else if(state.view==='expired') main.innerHTML = expiredViewHTML();
+  else if(state.view==='lowstock') main.innerHTML = lowStockViewHTML();
+  else if(state.view==='outofstock') main.innerHTML = outOfStockViewHTML();
+  else if(state.view==='backup') main.innerHTML = backupViewHTML();
+  attachMainEvents();
+}
+
+/* ============================= DASHBOARD ============================= */
+function hasValidSubcategory(item){
+  const table = item.isFood ? EXPIRY_DAYS.food : EXPIRY_DAYS.nonfood;
+  return Object.prototype.hasOwnProperty.call(table, item.subcategory);
+}
+function hasValidLocation(item){
+  return !!locationById(item.locationId);
+}
+function itemsNeedingReview(items){
+  return items.filter(i => !hasValidSubcategory(i) || !hasValidLocation(i));
+}
+function stockPercent(item){
+  const total = itemTotalQty(item);
+  if(!item.parLevel || item.parLevel <= 0) return null;
+  return total / item.parLevel;
+}
+function isOutOfStock(item){ return itemTotalQty(item) <= 0; }
+function isRunningLow(item){
+  if(isOutOfStock(item)) return false;
+  const pct = stockPercent(item);
+  return pct !== null && pct <= 0.10;
+}
+function isItemExpired(item){
+  return (item.batches||[]).some(b=>{ const d=daysUntil(b.expirationDate); return d!==null && d<0; });
+}
+function dashboardHTML(){
+  const items = state.items;
+  const soon = expiringSoonCount(items,7);
+  const expired = expiredCount(items);
+  const reviewList = itemsNeedingReview(items);
+  const soonPairs = allBatchPairs(items)
+    .filter(({batch})=>{ const d=daysUntil(batch.expirationDate); return d!==null && d<=7; })
+    .sort((a,b)=> daysUntil(a.batch.expirationDate) - daysUntil(b.batch.expirationDate))
+    .slice(0,8);
+
+  return `
+    <div class="topbar">
+      <h1 class="page-title">Dashboard</h1>
+    </div>
+    <div class="grid cols-4" style="margin-bottom:26px;">
+      <div class="card"><p class="metric-label">Total items</p><p class="metric-value">${items.length}</p></div>
+      <div class="card"><p class="metric-label">Locations</p><p class="metric-value">${state.locations.length}</p></div>
+      <div class="card"><p class="metric-label">Expiring ≤ 7 days</p><p class="metric-value amber">${soon}</p></div>
+      <div class="card"><p class="metric-label">Expired</p><p class="metric-value rust">${expired}</p></div>
+    </div>
+    <section>
+      <h2>Needs attention</h2>
+      ${ soonPairs.length ? soonTableHTML(soonPairs) : `<div class="empty"><h3>Nothing expiring soon</h3><p>Batches with a tracked expiration date within 7 days will show up here.</p></div>` }
+    </section>
+    ${ reviewList.length ? `
+    <section>
+      <h2>Needs review — ${reviewList.length} item${reviewList.length===1?'':'s'} with an outdated subcategory or location</h2>
+      <table class="wrap-card card-table">
+        <thead><tr><th>Item</th><th>Issue</th></tr></thead>
+        <tbody>
+          ${reviewList.map(i=>{
+            const loc = locationById(i.locationId);
+            const issues = [];
+            if(!hasValidSubcategory(i)) issues.push(`<span class="tag tag-amber">Unrecognized subcategory: "${escapeHTML(i.subcategory||'(none)')}"</span>`);
+            if(!loc) issues.push(`<span class="tag tag-rust">Missing location</span>`);
+            return `<tr class="row-click" data-action="open-item" data-id="${i.id}">
+              <td class="card-title"><div class="item-cell">${thumbHTML(i)}<span>${escapeHTML(i.name)}</span></div></td>
+              <td data-label="Issue">${issues.join(' ')}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <p class="faint" style="margin-top:8px;">Tap an item and re-pick its subcategory and/or location to clear it from this list.</p>
+    </section>` : '' }
+    ${ state.locations.length===0 ? `
+    <section>
+      <div class="empty">
+        <h3>Set up your first storage location</h3>
+        <p>Add a location like "Kitchen Pantry" or "Garage Freezer", then start logging what's inside.</p>
+        <button class="btn btn-primary" data-action="open-add-location">+ Add a storage location</button>
+      </div>
+    </section>` : (items.length===0 ? `
+    <section>
+      <div class="empty">
+        <h3>Add your first item</h3>
+        <p>Your storage locations are set up — now log what's actually inside them.</p>
+        <button class="btn btn-primary" data-action="open-add-item">+ Add item</button>
+      </div>
+    </section>` : '') }
+  `;
+}
+function soonTableHTML(pairs){
+  return `
+  <table class="wrap-card card-table">
+    <thead><tr><th>Item</th><th>Location</th><th>Batch qty</th><th>Status</th><th>Freshness</th></tr></thead>
+    <tbody>
+      ${pairs.map(({item:i, batch:b})=>{
+        const f = freshnessInfo(b.expirationDate);
+        const loc = locationById(i.locationId);
+        return `<tr class="row-click" data-action="open-item" data-id="${i.id}">
+          <td class="card-title"><div class="item-cell">${thumbHTML(i)}<span>${escapeHTML(i.name)}</span></div></td>
+          <td data-label="Location" class="muted">${loc?escapeHTML(loc.name):'—'}</td>
+          <td data-label="Batch qty" class="num">${b.quantity} ${escapeHTML(i.unit||'')}</td>
+          <td data-label="Status"><span class="tag tag-${f.tag}">${f.label}</span></td>
+          <td data-label="Freshness">${freshBarHTML(f)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+}
+function freshBarHTML(f){
+  return `<div class="fresh-wrap"><div class="fresh-track"><div class="fresh-fill" style="width:${f.pct}%;background:${f.color}"></div></div></div>`;
+}
+
+/* ============================= ITEMS VIEW ============================= */
+function itemsViewHTML(){
+  return `
+    <div class="topbar">
+      <h1 class="page-title">Items</h1>
+      <div class="search-wrap">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="search-input" placeholder="Search items..." value="${escapeAttr(state.filter.search)}">
+      </div>
+      <button class="btn btn-primary" data-action="open-add-item">+ Add item</button>
+    </div>
+    <div class="filters">
+      <select id="filter-location">
+        <option value="">All locations</option>
+        ${state.locations.map(l=>`<option value="${l.id}" ${state.filter.locationId===l.id?'selected':''}>${escapeHTML(l.name)}</option>`).join('')}
+      </select>
+      <select id="filter-category">
+        <option value="">All categories</option>
+        <option value="food" ${state.filter.category==='food'?'selected':''}>Food</option>
+        <option value="nonfood" ${state.filter.category==='nonfood'?'selected':''}>Non-food</option>
+      </select>
+      <select id="filter-subcategory">
+        <option value="">All subcategories</option>
+        <optgroup label="Food">
+          ${subcategoryOptions(true).map(s=>`<option value="${escapeAttr(s)}" ${state.filter.subcategory===s?'selected':''}>${escapeHTML(s)}</option>`).join('')}
+        </optgroup>
+        <optgroup label="Non-food">
+          ${subcategoryOptions(false).map(s=>`<option value="${escapeAttr(s)}" ${state.filter.subcategory===s?'selected':''}>${escapeHTML(s)}</option>`).join('')}
+        </optgroup>
+      </select>
+      <select id="filter-status">
+        <option value="">Any status</option>
+        <option value="expired" ${state.filter.status==='expired'?'selected':''}>Expired</option>
+        <option value="soon" ${state.filter.status==='soon'?'selected':''}>Expiring ≤ 7 days</option>
+        <option value="fresh" ${state.filter.status==='fresh'?'selected':''}>Fresh</option>
+        <option value="none" ${state.filter.status==='none'?'selected':''}>No expiry tracked</option>
+      </select>
+    </div>
+    <div id="items-list-container"></div>
+  `;
+}
+function filteredItems(){
+  const f = state.filter;
+  return state.items.filter(i=>{
+    if(f.search){
+      const q = f.search.toLowerCase();
+      const matches = i.name.toLowerCase().includes(q) || (i.brand||'').toLowerCase().includes(q);
+      if(!matches) return false;
+    }
+    if(f.locationId && i.locationId !== f.locationId) return false;
+    if(f.category==='food' && !i.isFood) return false;
+    if(f.category==='nonfood' && i.isFood) return false;
+    if(f.subcategory && i.subcategory !== f.subcategory) return false;
+    if(f.status){
+      const eb = itemEarliestBatch(i);
+      const d = daysUntil(eb ? eb.expirationDate : null);
+      if(f.status==='expired' && !(d!==null && d<0)) return false;
+      if(f.status==='soon' && !(d!==null && d>=0 && d<=7)) return false;
+      if(f.status==='fresh' && !(d!==null && d>7)) return false;
+      if(f.status==='none' && d!==null) return false;
+    }
+    return true;
+  }).sort((a,b)=>{
+    const aOut = isOutOfStock(a) ? 1 : 0;
+    const bOut = isOutOfStock(b) ? 1 : 0;
+    if(aOut !== bOut) return aOut - bOut;
+    return a.name.localeCompare(b.name);
+  });
+}
+function itemRowHTML(i){
+  const f = itemFreshness(i);
+  const loc = locationById(i.locationId);
+  const stats = priceStats(i);
+  const batchCount = (i.batches||[]).length;
+  const outOfStock = isOutOfStock(i);
+  const statusCell = outOfStock
+    ? `<span class="tag tag-out">Out of stock</span>`
+    : `<span class="tag tag-${f.tag}">${f.label}</span>${batchCount>1?` <span class="faint">·${batchCount} batches</span>`:''}`;
+  return `<tr class="row-click" data-action="open-item" data-id="${i.id}">
+    <td class="card-title"><div class="item-cell">${thumbHTML(i)}<div><div>${escapeHTML(i.name)}${i.brand?` <span class="faint">— ${escapeHTML(i.brand)}</span>`:''}</div><div class="faint">${escapeHTML(i.subcategory||'')}</div></div></div></td>
+    <td data-label="Location" class="muted">${loc?escapeHTML(loc.name):'<span class="tag tag-rust">⚠ Missing location — tap to fix</span>'}</td>
+    <td data-label="Category"><span class="tag ${i.isFood?'tag-teal':'tag-gray'}">${i.isFood?'Food':'Non-food'}</span></td>
+    <td data-label="Qty" class="num">${itemTotalQty(i)} ${escapeHTML(i.unit||'')}</td>
+    <td data-label="Status">${statusCell}</td>
+    <td data-label="Freshness">${outOfStock ? '<span class="faint">—</span>' : freshBarHTML(f)}</td>
+    <td data-label="Best price" class="num">${stats ? fmtMoney(stats.min) : '—'}</td>
+  </tr>`;
+}
+function itemsTableHTML(list){
+  return `
+      <table class="wrap-card card-table">
+        <thead><tr><th>Item</th><th>Location</th><th>Category</th><th>Qty</th><th>Status</th><th>Freshness</th><th>Best price</th></tr></thead>
+        <tbody>${list.map(itemRowHTML).join('')}</tbody>
+      </table>`;
+}
+function renderItemsList(){
+  const container = document.getElementById('items-list-container');
+  if(!container) return;
+  const list = filteredItems();
+  if(!state.items.length){
+    container.innerHTML = `<div class="empty"><h3>No items yet</h3><p>Add your first item to start tracking stock, expiry, and pricing.</p><button class="btn btn-primary" data-action="open-add-item">+ Add item</button></div>`;
+  } else if(!list.length){
+    container.innerHTML = `<div class="empty"><h3>No matches</h3><p>Try a different search term or clear your filters.</p></div>`;
+  } else {
+    container.innerHTML = itemsTableHTML(list);
+  }
+  container.querySelectorAll('[data-action="open-item"]').forEach(el=>{
+    el.addEventListener('click', ()=> openItemDetail(el.dataset.id));
+  });
+  const addBtn = container.querySelector('[data-action="open-add-item"]');
+  if(addBtn) addBtn.addEventListener('click', ()=> openAddItemModal());
+}
+
+/* ============================= EXPIRED / LOW STOCK / OUT OF STOCK VIEWS ============================= */
+function expiredViewHTML(){
+  const pairs = allBatchPairs(state.items)
+    .filter(({batch})=>{ const d=daysUntil(batch.expirationDate); return d!==null && d<0; })
+    .sort((a,b)=> daysUntil(a.batch.expirationDate) - daysUntil(b.batch.expirationDate));
+  return `
+    <div class="topbar"><h1 class="page-title">Expired</h1></div>
+    ${ pairs.length ? soonTableHTML(pairs) : `<div class="empty"><h3>Nothing expired</h3><p>Batches past their expiration date will show up here.</p></div>` }
+  `;
+}
+function lowStockViewHTML(){
+  const list = state.items.filter(isRunningLow).sort((a,b)=> stockPercent(a) - stockPercent(b));
+  return `
+    <div class="topbar"><h1 class="page-title">Running Low</h1></div>
+    <p class="faint" style="margin:-8px 0 14px;">Items at or below 10% of their restock target. Set a restock target on an item's detail page (under Unit) to have it tracked here.</p>
+    ${ list.length ? itemsTableHTML(list) : `<div class="empty"><h3>Nothing running low</h3><p>Items at or below 10% of their restock target will show up here.</p></div>` }
+  `;
+}
+function outOfStockViewHTML(){
+  const list = state.items.filter(isOutOfStock).sort((a,b)=> a.name.localeCompare(b.name));
+  return `
+    <div class="topbar"><h1 class="page-title">Out of Stock</h1></div>
+    ${ list.length ? itemsTableHTML(list) : `<div class="empty"><h3>Nothing out of stock</h3><p>Items with zero quantity across all batches will show up here.</p></div>` }
+  `;
+}
+function backupViewHTML(){
+  const photoCount = state.items.filter(i=>i.photo).length;
+  return `
+    <div class="topbar"><h1 class="page-title">Backup &amp; Restore</h1></div>
+    <div class="card" style="margin-bottom:18px;">
+      <p class="metric-label" style="margin:0 0 4px;">Download a backup</p>
+      <p class="faint" style="margin:0 0 14px;">Saves a local copy on your device (${state.items.length} items, ${state.locations.length} locations), completely independent of Claude's storage.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" data-action="export-backup-full">⬇ Full backup${photoCount ? ` (incl. ${photoCount} photo${photoCount===1?'':'s'})` : ''}</button>
+        <button class="btn btn-sm" data-action="export-backup-nophotos">⬇ Backup without photos (smaller file)</button>
+      </div>
+    </div>
+    <div class="card">
+      <p class="metric-label" style="margin:0 0 4px;">Restore from a backup</p>
+      <p class="faint" style="margin:0 0 14px;">Replaces everything currently in the app with the contents of a backup file. You'll be asked to confirm before anything is overwritten.</p>
+      <div class="file-btn" style="display:inline-block;"><button type="button" class="btn btn-sm">⬆ Choose backup file to restore</button><input id="import-backup-input" type="file" accept="application/json,.json"></div>
+    </div>
+  `;
+}
+
+/* ============================= LOCATIONS VIEW ============================= */
+function locationsViewHTML(){
+  return `
+    <div class="topbar">
+      <h1 class="page-title">Locations</h1>
+      <button class="btn btn-primary" style="margin-left:auto;" data-action="open-add-location">+ Add location</button>
+    </div>
+    <div id="locations-grid" class="grid cols-3"></div>
+  `;
+}
+const IMPORT_LOCATION_LIST = [
+  { id: 'loc-kitchen-fridge', name: 'Kitchen Fridge', type: 'Refrigerator' },
+  { id: 'loc-kitchen-fridge-medicine-drawer', name: 'Kitchen Fridge Medicine Drawer', type: 'Medicine cabinet' },
+  { id: 'loc-kitchen-freezer', name: 'Kitchen Freezer', type: 'Freezer' },
+  { id: 'loc-kitchen-pantry', name: 'Kitchen Pantry', type: 'Pantry' },
+  { id: 'loc-kitchen-noodle-cabinet', name: 'Kitchen Noodle Cabinet', type: 'Kitchen cabinet' },
+  { id: 'loc-kitchen-medicine-cabinet', name: 'Kitchen Medicine Cabinet', type: 'Medicine cabinet' },
+  { id: 'loc-kitchen-sauce-cabinet', name: 'Kitchen Sauce Cabinet', type: 'Kitchen cabinet' },
+  { id: 'loc-service-yard-cabinet', name: 'Service Yard Cabinet', type: 'Laundry area' },
+  { id: 'loc-kitchen-under-sink', name: 'Kitchen Under Sink', type: 'Laundry area' },
+  { id: 'loc-storeroom', name: 'Storeroom', type: 'Garage / storeroom' },
+  { id: 'loc-living-room-cabinets', name: 'Living Room Cabinets', type: 'Other' },
+  { id: 'loc-pantry-cabinet', name: 'Pantry Cabinets', type: 'Pantry' },
+  { id: 'loc-study-room-daybed-storage', name: 'Study Room Daybed Storage', type: 'Other' },
+  { id: 'loc-study-room-bookshelf', name: 'Study Room Bookshelf', type: 'Other' },
+  { id: 'loc-cobae-toilet-cabinet', name: 'Cobae Toilet Cabinet', type: 'Bathroom cabinet' },
+  { id: 'loc-master-toilet-cabinet', name: 'Master Toilet Cabinet', type: 'Bathroom cabinet' },
+  { id: 'loc-master-bedroom-storage', name: 'Master Bedroom Storage', type: 'Other' }
+];
+// Default locations retired from the canonical list above. Removed automatically on
+// load only if nothing has been filed under them yet, so no item links get orphaned.
+const DEPRECATED_LOCATION_IDS = ['loc-medicine-cabinet'];
+async function mergeInLocations(list, opts){
+  const silent = opts && opts.silent;
+  const byId = new Map(state.locations.map(l=>[l.id, l]));
+  const existingNames = new Set(state.locations.map(l=>l.name.trim().toLowerCase()));
+  let added = 0, updated = 0, skipped = 0;
+  list.forEach(loc=>{
+    if(loc.id && byId.has(loc.id)){
+      const existing = byId.get(loc.id);
+      if(existing.name !== loc.name || existing.type !== loc.type){
+        existing.name = loc.name;
+        existing.type = loc.type;
+        updated++;
+      } else skipped++;
+      return;
+    }
+    if(existingNames.has(loc.name.trim().toLowerCase())){ skipped++; return; }
+    state.locations.push({ id: loc.id || uid(), name: loc.name, type: loc.type });
+    existingNames.add(loc.name.trim().toLowerCase());
+    added++;
+  });
+  state.locations = state.locations.filter(l=> !(DEPRECATED_LOCATION_IDS.includes(l.id) && itemsInLocation(l.id).length===0));
+  if(!silent){
+    showToast(`Imported ${added} new, updated ${updated}, skipped ${skipped}.`, {duration:4000});
+    renderMain();
+  }
+  return { added, skipped, updated };
+}
+function renderLocationsGrid(){
+  const grid = document.getElementById('locations-grid');
+  if(!grid) return;
+  if(!state.locations.length){
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;"><h3>No locations yet</h3><p>Add the places in your house where you store things — pantry, fridge, garage shelf, bathroom cabinet.</p><button class="btn btn-primary" data-action="open-add-location">+ Add location</button></div>`;
+  } else {
+    grid.innerHTML = state.locations.map(l=>{
+      const items = itemsInLocation(l.id);
+      const soon = expiringSoonCount(items,7);
+      return `<div class="loc-card" data-action="open-location" data-id="${l.id}">
+        <p class="loc-name">${escapeHTML(l.name)}</p>
+        <p class="loc-type">${escapeHTML(l.type||'General storage')}</p>
+        <div class="loc-stats">
+          <div><div class="loc-stat-num">${items.length}</div><div class="loc-stat-lab">Items</div></div>
+          <div><div class="loc-stat-num" style="color:${soon?'var(--amber)':'inherit'}">${soon}</div><div class="loc-stat-lab">Expiring soon</div></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  grid.querySelectorAll('[data-action="open-location"]').forEach(el=>{
+    el.addEventListener('click', ()=> openLocationDetail(el.dataset.id));
+  });
+  const addBtn = grid.querySelector('[data-action="open-add-location"]');
+  if(addBtn) addBtn.addEventListener('click', openAddLocationModal);
+}
+
+/* ============================= MAIN EVENT WIRING ============================= */
+function attachMainEvents(){
+  document.querySelectorAll('[data-action="open-add-item"]').forEach(el=> el.addEventListener('click', ()=> openAddItemModal()));
+  document.querySelectorAll('[data-action="open-add-location"]').forEach(el=> el.addEventListener('click', openAddLocationModal));
+
+  if(state.view==='items'){
+    renderItemsList();
+    const s = document.getElementById('search-input');
+    s.addEventListener('input', (e)=>{ state.filter.search = e.target.value; renderItemsList(); });
+    document.getElementById('filter-location').addEventListener('change', e=>{ state.filter.locationId = e.target.value; renderItemsList(); });
+    document.getElementById('filter-category').addEventListener('change', e=>{ state.filter.category = e.target.value; renderItemsList(); });
+    document.getElementById('filter-subcategory').addEventListener('change', e=>{ state.filter.subcategory = e.target.value; renderItemsList(); });
+    document.getElementById('filter-status').addEventListener('change', e=>{ state.filter.status = e.target.value; renderItemsList(); });
+  }
+  if(state.view==='locations'){
+    renderLocationsGrid();
+  }
+  if(state.view==='dashboard'){
+    document.querySelectorAll('[data-action="open-item"]').forEach(el=> el.addEventListener('click', ()=> openItemDetail(el.dataset.id)));
+  }
+  if(state.view==='backup'){
+    const exportFullBtn = document.querySelector('[data-action="export-backup-full"]');
+    if(exportFullBtn) exportFullBtn.addEventListener('click', ()=> exportBackup(true));
+    const exportNoPhotosBtn = document.querySelector('[data-action="export-backup-nophotos"]');
+    if(exportNoPhotosBtn) exportNoPhotosBtn.addEventListener('click', ()=> exportBackup(false));
+    const importInput = document.getElementById('import-backup-input');
+    if(importInput) importInput.addEventListener('change', handleImportBackup);
+  }
+  if(state.view==='expired' || state.view==='lowstock' || state.view==='outofstock'){
+    document.querySelectorAll('[data-action="open-item"]').forEach(el=> el.addEventListener('click', ()=> openItemDetail(el.dataset.id)));
+  }
+}
+
+/* ============================= MODALS ============================= */
+const modalRoot = document.getElementById('modal-root');
+function closeModal(){ modalRoot.classList.remove('open'); modalRoot.innerHTML=''; }
+function openModal(html){ modalRoot.innerHTML = html; modalRoot.classList.add('open'); }
+modalRoot.addEventListener('click', (e)=>{ if(e.target===modalRoot) closeModal(); });
+
+/* --- Toast / Alert / Confirm (replaces native alert()/confirm(), which the
+   artifact sandbox silently blocks without any error) --- */
+function showToast(message, opts){
+  opts = opts || {};
+  const stack = document.getElementById('toast-stack');
+  if(!stack) return;
+  const el = document.createElement('div');
+  el.className = 'toast' + (opts.warn ? ' warn' : '');
+  el.textContent = message;
+  stack.appendChild(el);
+  requestAnimationFrame(()=> el.classList.add('show'));
+  const duration = opts.duration || 6000;
+  setTimeout(()=>{
+    el.classList.remove('show');
+    setTimeout(()=> el.remove(), 300);
+  }, duration);
+}
+function showAlertModal(title, message){
+  openModal(`
+    <div class="modal">
+      <div class="modal-head">
+        <h3 class="modal-title">${escapeHTML(title)}</h3>
+        <button class="modal-close" data-action="close">&times;</button>
+      </div>
+      <p style="font-size:13.5px;line-height:1.5;">${escapeHTML(message)}</p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" data-action="close">OK</button>
+      </div>
+    </div>
+  `);
+  modalRoot.querySelectorAll('[data-action="close"]').forEach(el=>el.addEventListener('click', closeModal));
+}
+function showConfirmModal(title, message, confirmLabel, onConfirm){
+  openModal(`
+    <div class="modal">
+      <div class="modal-head">
+        <h3 class="modal-title">${escapeHTML(title)}</h3>
+        <button class="modal-close" data-action="close">&times;</button>
+      </div>
+      <div style="font-size:13.5px;line-height:1.5;">${message}</div>
+      <div class="modal-actions">
+        <button class="btn" data-action="close">Cancel</button>
+        <button class="btn btn-primary" id="confirm-modal-yes">${escapeHTML(confirmLabel || 'Confirm')}</button>
+      </div>
+    </div>
+  `);
+  modalRoot.querySelectorAll('[data-action="close"]').forEach(el=>el.addEventListener('click', closeModal));
+  document.getElementById('confirm-modal-yes').addEventListener('click', onConfirm);
+}
+
+/* --- Add Location --- */
+function openAddLocationModal(){
+  openModal(`
+    <div class="modal">
+      <div class="modal-head">
+        <h3 class="modal-title">Add storage location</h3>
+        <button class="modal-close" data-action="close">&times;</button>
+      </div>
+      <div class="field"><label>Location name</label><input id="loc-name" type="text" placeholder="e.g. Kitchen Pantry"></div>
+      <div class="field">
+        <label>Type</label>
+        <select id="loc-type">
+          <option>Pantry</option><option>Refrigerator</option><option>Freezer</option>
+          <option>Kitchen cabinet</option><option>Bathroom cabinet</option><option>Medicine cabinet</option><option>Garage / storeroom</option>
+          <option>Laundry area</option><option>Other</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" data-action="close">Cancel</button>
+        <button class="btn btn-primary" id="save-location">Add location</button>
+      </div>
+    </div>
+  `);
+  modalRoot.querySelectorAll('[data-action="close"]').forEach(el=>el.addEventListener('click', closeModal));
+  document.getElementById('save-location').addEventListener('click', async ()=>{
+    const name = document.getElementById('loc-name').value.trim();
+    if(!name) return;
+    const type = document.getElementById('loc-type').value;
+    state.locations.push({ id: uid(), name, type });
+    await saveLocations();
+    closeModal();
+    renderMain();
+  });
+}
+
+/* --- Location detail (rename / delete) --- */
+function openLocationDetail(id){
+  const loc = locationById(id);
+  if(!loc) return;
+  const items = itemsInLocation(id);
+  openModal(`
+    <div class="modal">
+      <div class="modal-head">
+        <h3 class="modal-title">${escapeHTML(loc.name)}</h3>
+        <button class="modal-close" data-action="close">&times;</button>
+      </div>
+      <div class="field"><label>Location name</label><input id="edit-loc-name" type="text" value="${escapeAttr(loc.name)}"></div>
+      <div class="field">
+        <label>Type</label>
+        <select id="edit-loc-type">
+          ${['Pantry','Refrigerator','Freezer','Kitchen cabinet','Bathroom cabinet','Medicine cabinet','Garage / storeroom','Laundry area','Other'].map(t=>`<option ${loc.type===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <p class="detail-label">${items.length} item${items.length===1?'':'s'} stored here</p>
+      <div class="modal-actions" style="justify-content:space-between;">
+        <button class="btn btn-danger" id="delete-location">Delete location</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" data-action="close">Cancel</button>
+          <button class="btn btn-primary" id="save-edit-location">Save changes</button>
+        </div>
+      </div>
+    </div>
+  `);
+  modalRoot.querySelectorAll('[data-action="close"]').forEach(el=>el.addEventListener('click', closeModal));
+  document.getElementById('save-edit-location').addEventListener('click', async ()=>{
+    loc.name = document.getElementById('edit-loc-name').value.trim() || loc.name;
+    loc.type = document.getElementById('edit-loc-type').value;
+    await saveLocations();
+    closeModal(); renderMain();
+  });
+  document.getElementById('delete-location').addEventListener('click', async ()=>{
+    if(items.length){
+      showToast('This location still has items in it. Move or delete those items first.', {warn:true});
+      return;
+    }
+    state.locations = state.locations.filter(l=>l.id!==id);
+    await saveLocations();
+    closeModal(); renderMain();
+  });
+}
+
+/* --- Add Item --- */
+function openAddItemModal(prefill){
+  if(!state.locations.length){
+    closeModal();
+    openAddLocationModalWithNote('Add a storage location first, then you can add items to it.');
+    return;
+  }
+  pendingItemPhoto = (prefill && prefill.photo) || null;
+  renderAddItemModal((prefill && prefill.isFood) !== undefined ? prefill.isFood : true, prefill);
+}
+function duplicateItem(item){
+  openAddItemModal({
+    isFood: item.isFood,
+    name: item.name,
+    brand: item.brand || '',
+    subcategory: item.subcategory,
+    locationId: item.locationId,
+    unit: item.unit || '',
+    parLevel: item.parLevel,
+    photo: null,
+    title: 'Duplicate item',
+    saveLabel: 'Add as new item'
+  });
+}
+function refreshItemPhotoPreview(){
+  const el = document.getElementById('it-photo-preview');
+  if(!el) return;
+  if(pendingItemPhoto) el.outerHTML = `<img id="it-photo-preview" class="photo-preview" src="${pendingItemPhoto}" alt="">`;
+  else el.outerHTML = `<div id="it-photo-preview" class="photo-preview-placeholder">No photo</div>`;
+}
+function openAddLocationModalWithNote(note){
+  openAddLocationModal();
+  const modal = modalRoot.querySelector('.modal');
+  const hint = document.createElement('p');
+  hint.className = 'hint';
+  hint.style.marginTop = '-4px';
+  hint.textContent = note;
+  modal.insertBefore(hint, modal.querySelector('.field'));
+}
+function renderAddItemModal(isFood, prefill){
+  prefill = prefill || {};
+  openModal(`
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h3 class="modal-title">${prefill.title || 'Add item'}</h3>
+        <button class="modal-close" data-action="close">&times;</button>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-opt ${isFood?'active':''}" data-toggle="food">Food</div>
+        <div class="toggle-opt ${!isFood?'active':''}" data-toggle="nonfood">Non-food</div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Item name</label><input id="it-name" type="text" placeholder="e.g. Ketchup" value="${escapeAttr(prefill.name||'')}"></div>
+        <div class="field"><label>Brand (optional)</label><input id="it-brand" type="text" placeholder="e.g. Heinz" value="${escapeAttr(prefill.brand||'')}"></div>
+      </div>
+      <div class="field">
+        <label>Photo (optional)</label>
+        <div class="photo-picker">
+          ${pendingItemPhoto ? `<img id="it-photo-preview" class="photo-preview" src="${pendingItemPhoto}" alt="">` : `<div id="it-photo-preview" class="photo-preview-placeholder">No photo</div>`}
+          <div class="photo-buttons">
+            <div class="file-btn"><button type="button" class="btn btn-sm">Take photo</button><input id="it-photo-camera" type="file" accept="image/*" capture="environment"></div>
+            <div class="file-btn"><button type="button" class="btn btn-sm">Choose from library</button><input id="it-photo-upload" type="file" accept="image/*"></div>
+          </div>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Subcategory</label>
+          <select id="it-subcat">
+            ${subcategoryOptions(isFood).map(s=>`<option ${prefill.subcategory===s?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Storage location</label>
+          <select id="it-location">${state.locations.map(l=>`<option value="${l.id}" ${prefill.locationId===l.id?'selected':''}>${escapeHTML(l.name)}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Quantity</label><input id="it-qty" type="number" min="0" step="0.1" value="1"></div>
+        <div class="field"><label>Unit</label><input id="it-unit" type="text" placeholder="pcs, g, L, box" value="${escapeAttr(prefill.unit||'')}"></div>
+      </div>
+      <div class="field">
+        <label>Restock target (optional)</label>
+        <input id="it-par" type="number" min="0" step="0.1" placeholder="Defaults to quantity above" value="${prefill.parLevel!=null?prefill.parLevel:''}">
+        <p class="hint" style="margin:2px 0 0;">Used to flag "Running Low" — when stock drops to 10% of this, it'll show up on that page.</p>
+      </div>
+      <div class="field">
+        <label>Expiration date <span class="faint" id="est-note"></span></label>
+        <input id="it-expiry" type="date">
+      </div>
+      <p class="hint" style="margin-top:-8px;">Buying more later with a different expiry date? Add it as a new batch from the item's detail view once it's created.</p>
+      <div class="detail-label" style="margin-top:6px;">Purchase record (optional)</div>
+      <div class="field-row">
+        <div class="field"><label>Purchased from</label><input id="pu-store" type="text" placeholder="e.g. FairPrice"></div>
+        <div class="field"><label>Date purchased</label><input id="pu-date" type="date" value="${todayISO()}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Total price paid</label><input id="pu-price" type="number" min="0" step="0.01" placeholder="0.00"></div>
+        <div class="field"><label>Quantity purchased</label><input id="pu-qty" type="number" min="0" step="0.1" placeholder="matches qty above"></div>
+      </div>
+      <div class="field"><label>Promotion (optional)</label><input id="pu-promo" type="text" placeholder="e.g. Buy 2 Get 5% Off"></div>
+      <div class="modal-actions">
+        <button class="btn" data-action="close">Cancel</button>
+        <button class="btn btn-primary" id="save-item">${prefill.saveLabel || 'Add item'}</button>
+      </div>
+    </div>
+  `);
+  wireAddItemModal(isFood, prefill);
+}
+let pendingItemPhoto = null;
+function wireAddItemModal(isFood, prefill){
+  modalRoot.querySelectorAll('[data-action="close"]').forEach(el=>el.addEventListener('click', closeModal));
+  modalRoot.querySelectorAll('[data-toggle]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const nowFood = el.dataset.toggle === 'food';
+      const preserved = {
+        name: document.getElementById('it-name').value,
+        brand: document.getElementById('it-brand').value,
+        loc: document.getElementById('it-location').value,
+        qty: document.getElementById('it-qty').value,
+        unit: document.getElementById('it-unit').value,
+        par: document.getElementById('it-par').value
+      };
+      renderAddItemModal(nowFood, prefill);
+      document.getElementById('it-name').value = preserved.name;
+      document.getElementById('it-brand').value = preserved.brand;
+      document.getElementById('it-location').value = preserved.loc;
+      document.getElementById('it-qty').value = preserved.qty;
+      document.getElementById('it-unit').value = preserved.unit;
+      document.getElementById('it-par').value = preserved.par;
+      refreshItemPhotoPreview();
+    });
+  });
+
+  async function handlePhotoInput(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    try{
+      pendingItemPhoto = await compressImage(file);
+      refreshItemPhotoPreview();
+    }catch(err){ showToast('Could not read that photo. Try another file.', {warn:true}); }
+  }
+  document.getElementById('it-photo-camera').addEventListener('change', handlePhotoInput);
+  document.getElementById('it-photo-upload').addEventListener('change', handlePhotoInput);
+  refreshItemPhotoPreview();
+  const subcatSel = document.getElementById('it-subcat');
+  const expiryInput = document.getElementById('it-expiry');
+  const estNote = document.getElementById('est-note');
+  function applyEstimate(){
+    const est = estimateExpiry(isFood, subcatSel.value, todayISO());
+    if(est){ expiryInput.value = est; estNote.textContent = '(estimated)'; }
+    else { expiryInput.value = ''; estNote.textContent = '(not typically tracked)'; }
+  }
+  subcatSel.addEventListener('change', applyEstimate);
+  applyEstimate();
+  expiryInput.addEventListener('input', ()=> estNote.textContent='');
+
+  document.getElementById('save-item').addEventListener('click', async ()=>{
+    const name = document.getElementById('it-name').value.trim();
+    if(!name) return;
+    const brand = document.getElementById('it-brand').value.trim();
+    const locationId = document.getElementById('it-location').value;
+    const quantity = parseFloat(document.getElementById('it-qty').value) || 0;
+    const unit = document.getElementById('it-unit').value.trim();
+    const subcategory = subcatSel.value;
+    const expirationDate = expiryInput.value || null;
+
+    const parInput = document.getElementById('it-par').value;
+    const parLevel = parInput !== '' ? parseFloat(parInput) : (quantity > 0 ? quantity : null);
+    const item = {
+      id: uid(), name, brand, isFood, subcategory, locationId,
+      unit, parLevel,
+      batches: [{ id: uid(), quantity, expirationDate }],
+      photo: pendingItemPhoto,
+      purchases: []
+    };
+    const puStore = document.getElementById('pu-store').value.trim();
+    const puPrice = parseFloat(document.getElementById('pu-price').value);
+    const puQty = parseFloat(document.getElementById('pu-qty').value) || quantity || 1;
+    const puDate = document.getElementById('pu-date').value || todayISO();
+    const puPromo = document.getElementById('pu-promo').value.trim();
+    if(puStore && !isNaN(puPrice)){
+      item.purchases.push({ id: uid(), store: puStore, price: puPrice, qty: puQty, date: puDate, promo: puPromo });
+    }
+    state.items.push(item);
+    const ok = await saveItems();
+    closeModal();
+    renderMain();
+    if(!ok) showToast(`Heads up: "${name}" could not be saved right now (storage is being unreliable). It will show up until you refresh, but is NOT actually saved yet — try re-adding it shortly.${item.photo ? ' Photos in particular seem to be triggering this today.' : ''}`, {warn:true, duration:9000});
+  });
+}
+
+/* --- Item detail --- */
+function openItemDetail(id, isFoodOverride){
+  const item = state.items.find(i=>i.id===id);
+  if(!item) return;
+  const stats = priceStats(item);
+  const purchasesSorted = [...(item.purchases||[])].sort((a,b)=> new Date(b.date)-new Date(a.date));
+  const totalQty = itemTotalQty(item);
+  const batches = item.batches || [];
+  const isFood = (isFoodOverride===undefined || isFoodOverride===null) ? item.isFood : isFoodOverride;
+  const subcatOpts = subcategoryOptions(isFood);
+  const currentSubcat = subcatOpts.includes(item.subcategory) ? item.subcategory : subcatOpts[0];
+
+  openModal(`
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h3 class="modal-title">${escapeHTML(item.name)}${item.brand?` <span class="faint" style="font-size:14px;font-weight:500;">— ${escapeHTML(item.brand)}</span>`:''}</h3>
+        <button class="modal-close" data-action="close">&times;</button>
+      </div>
+
+      <div class="detail-section">
+        <div class="photo-picker">
+          ${item.photo ? `<img id="d-photo-preview" class="photo-preview" src="${item.photo}" alt="">` : `<div id="d-photo-preview" class="photo-preview-placeholder">No photo</div>`}
+          <div class="photo-buttons">
+            <div class="file-btn"><button type="button" class="btn btn-sm">${item.photo?'Retake photo':'Take photo'}</button><input id="d-photo-camera" type="file" accept="image/*" capture="environment"></div>
+            <div class="file-btn"><button type="button" class="btn btn-sm">Choose from library</button><input id="d-photo-upload" type="file" accept="image/*"></div>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Item name</label><input id="d-name" type="text" value="${escapeAttr(item.name)}"></div>
+          <div class="field"><label>Brand (optional)</label><input id="d-brand" type="text" value="${escapeAttr(item.brand||'')}" placeholder="e.g. Heinz"></div>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-opt ${isFood?'active':''}" data-toggle="food">Food</div>
+          <div class="toggle-opt ${!isFood?'active':''}" data-toggle="nonfood">Non-food</div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Subcategory</label>
+            <select id="d-subcat">${subcatOpts.map(s=>`<option ${currentSubcat===s?'selected':''}>${s}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Location</label>
+            <select id="d-location">${state.locations.map(l=>`<option value="${l.id}" ${l.id===item.locationId?'selected':''}>${escapeHTML(l.name)}</option>`).join('')}</select>
+          </div>
+        </div>
+        <div class="field"><label>Unit</label><input id="d-unit" type="text" value="${escapeAttr(item.unit||'')}"></div>
+        <div class="field">
+          <label>Restock target (optional)</label>
+          <input id="d-par" type="number" min="0" step="0.1" value="${item.parLevel!=null?item.parLevel:''}" placeholder="e.g. 10">
+          <p class="hint" style="margin:2px 0 0;">Used to flag "Running Low" — when stock drops to 10% of this. Leave blank to exclude this item from that page.</p>
+        </div>
+        <div class="modal-actions" style="border-top:none;padding-top:0;justify-content:flex-start;">
+          <button class="btn btn-sm" id="save-item-fields">Save changes</button>
+          <button class="btn btn-sm" id="duplicate-item">Duplicate as new item</button>
+          <button class="btn btn-sm btn-danger" id="delete-item">Delete item</button>
+        </div>
+      </div>
+
+      <div class="detail-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+          <p class="detail-label" style="margin:0;">Stock batches — ${totalQty} ${escapeHTML(item.unit||'')} total${batches.length>1?` across ${batches.length} batches`:''}</p>
+          <button class="btn btn-sm" id="show-add-batch">+ Add batch</button>
+        </div>
+        <p class="faint" style="margin:-4px 0 10px;">Bought more with a different expiration date? Add it as its own batch instead of a new item — it'll be tracked separately here but stay one product.</p>
+        ${ batches.length ? `
+        <table class="wrap-card card-table" style="margin-bottom:12px;">
+          <thead><tr><th>Quantity</th><th>Expiration</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${batches.map(b=>{
+              const bf = freshnessInfo(b.expirationDate);
+              return `<tr>
+                <td data-label="Quantity" class="card-title"><input type="number" min="0" step="0.1" class="batch-qty" data-batch-id="${b.id}" value="${b.quantity}" style="width:90px;"></td>
+                <td data-label="Expiration"><input type="date" class="batch-expiry" data-batch-id="${b.id}" value="${b.expirationDate||''}"></td>
+                <td data-label="Status"><span class="tag tag-${bf.tag}">${bf.label}</span></td>
+                <td class="card-action"><button class="btn btn-sm btn-ghost" data-del-batch="${b.id}">Remove</button></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>` : `<p class="faint" style="margin-bottom:12px;">No stock logged yet — add a batch below.</p>` }
+        <div id="add-batch-form" style="display:none;border-top:1px solid var(--border);padding-top:12px;">
+          <div class="field-row">
+            <div class="field"><label>Quantity</label><input id="nb-qty" type="number" min="0" step="0.1" value="1"></div>
+            <div class="field"><label>Expiration date</label><input id="nb-expiry" type="date"></div>
+          </div>
+          <button class="btn btn-sm btn-primary" id="save-new-batch">Add batch</button>
+        </div>
+      </div>
+
+      <div class="detail-section">
+        <p class="detail-label">Price insights</p>
+        ${ stats ? `
+        <div class="price-stats">
+          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.min)}</div><div class="price-stat-lab">Best price seen (${escapeHTML(stats.minStore)})</div></div>
+          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.avg)}</div><div class="price-stat-lab">Average price / unit</div></div>
+          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.latest)}</div><div class="price-stat-lab">Most recent (${escapeHTML(stats.latestStore)})</div></div>
+        </div>
+        <p class="faint">Based on ${stats.count} purchase${stats.count===1?'':'s'}. A reasonable price to stock up at or below: <strong class="mono">${fmtMoney(stats.min)}</strong> per unit.</p>
+        ` : `<p class="faint">No purchase history yet. Add one below to start tracking pricing.</p>` }
+      </div>
+
+      <div class="detail-section">
+        <p class="detail-label">Purchase history</p>
+        ${ purchasesSorted.length ? `
+        <table class="wrap-card card-table" style="margin-bottom:14px;">
+          <thead><tr><th>Date</th><th>Store</th><th>Paid</th><th>Qty</th><th>Per unit</th><th>Promo</th><th></th></tr></thead>
+          <tbody>
+            ${purchasesSorted.map(p=>`<tr>
+              <td data-label="Date" class="card-title">${fmtDate(p.date)}</td>
+              <td data-label="Store">${escapeHTML(p.store)}</td>
+              <td data-label="Paid" class="num">${fmtMoney(p.price)}</td>
+              <td data-label="Qty" class="num">${p.qty}</td>
+              <td data-label="Per unit" class="num">${fmtMoney(p.price/(p.qty||1))}</td>
+              <td data-label="Promo" class="faint">${escapeHTML(p.promo||'—')}</td>
+              <td class="card-action"><button class="btn btn-sm btn-ghost" data-del-purchase="${p.id}">Remove</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>` : '' }
+        <div class="field-row">
+          <div class="field"><label>Purchased from</label><input id="np-store" type="text" placeholder="e.g. Cold Storage"></div>
+          <div class="field"><label>Date</label><input id="np-date" type="date" value="${todayISO()}"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Total price paid</label><input id="np-price" type="number" min="0" step="0.01" placeholder="0.00"></div>
+          <div class="field"><label>Quantity purchased</label><input id="np-qty" type="number" min="0" step="0.1" value="1"></div>
+        </div>
+        <div class="field"><label>Promotion (optional)</label><input id="np-promo" type="text" placeholder="e.g. 3 for $10"></div>
+        <button class="btn btn-sm" id="add-purchase">+ Add purchase record</button>
+      </div>
+    </div>
+  `);
+
+  modalRoot.querySelectorAll('[data-action="close"]').forEach(el=>el.addEventListener('click', closeModal));
+
+  modalRoot.querySelectorAll('[data-toggle]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const nowFood = el.dataset.toggle === 'food';
+      const preserved = {
+        name: document.getElementById('d-name').value,
+        brand: document.getElementById('d-brand').value,
+        location: document.getElementById('d-location').value,
+        unit: document.getElementById('d-unit').value,
+        par: document.getElementById('d-par').value
+      };
+      openItemDetail(item.id, nowFood);
+      document.getElementById('d-name').value = preserved.name;
+      document.getElementById('d-brand').value = preserved.brand;
+      document.getElementById('d-location').value = preserved.location;
+      document.getElementById('d-unit').value = preserved.unit;
+      document.getElementById('d-par').value = preserved.par;
+    });
+  });
+
+  async function handleDetailPhotoInput(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    try{
+      item.photo = await compressImage(file);
+      const ok = await saveItems();
+      openItemDetail(item.id);
+      if(!ok) showToast('Heads up: this photo could not be saved right now (storage is being unreliable). It will show up until you refresh, but is NOT actually saved — try again shortly.', {warn:true, duration:8000});
+    }catch(err){ showToast('Could not read that photo. Try another file.', {warn:true}); }
+  }
+  document.getElementById('d-photo-camera').addEventListener('change', handleDetailPhotoInput);
+  document.getElementById('d-photo-upload').addEventListener('change', handleDetailPhotoInput);
+
+  document.getElementById('save-item-fields').addEventListener('click', async ()=>{
+    const newName = document.getElementById('d-name').value.trim();
+    if(newName) item.name = newName;
+    item.brand = document.getElementById('d-brand').value.trim();
+    const activeToggle = modalRoot.querySelector('[data-toggle].active');
+    item.isFood = activeToggle ? activeToggle.dataset.toggle === 'food' : item.isFood;
+    item.subcategory = document.getElementById('d-subcat').value;
+    item.locationId = document.getElementById('d-location').value;
+    item.unit = document.getElementById('d-unit').value.trim();
+    const parVal = document.getElementById('d-par').value;
+    item.parLevel = parVal !== '' ? parseFloat(parVal) : null;
+    warnIfSaveFailed(await saveItems(), 'these changes');
+    closeModal(); renderMain();
+  });
+  document.getElementById('duplicate-item').addEventListener('click', ()=>{
+    closeModal();
+    duplicateItem(item);
+  });
+  document.getElementById('delete-item').addEventListener('click', async ()=>{
+    state.items = state.items.filter(i=>i.id!==item.id);
+    warnIfSaveFailed(await saveItems(), 'this deletion');
+    closeModal(); renderMain();
+  });
+
+  // Batch editing
+  modalRoot.querySelectorAll('.batch-qty').forEach(inp=>{
+    inp.addEventListener('change', async ()=>{
+      const b = item.batches.find(x=>x.id===inp.dataset.batchId);
+      if(b){ b.quantity = parseFloat(inp.value) || 0; warnIfSaveFailed(await saveItems(), 'this batch quantity'); openItemDetail(item.id); }
+    });
+  });
+  modalRoot.querySelectorAll('.batch-expiry').forEach(inp=>{
+    inp.addEventListener('change', async ()=>{
+      const b = item.batches.find(x=>x.id===inp.dataset.batchId);
+      if(b){ b.expirationDate = inp.value || null; warnIfSaveFailed(await saveItems(), 'this expiration date'); openItemDetail(item.id); }
+    });
+  });
+  modalRoot.querySelectorAll('[data-del-batch]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      item.batches = item.batches.filter(b=>b.id !== btn.dataset.delBatch);
+      warnIfSaveFailed(await saveItems(), 'this batch removal');
+      openItemDetail(item.id);
+    });
+  });
+  document.getElementById('show-add-batch').addEventListener('click', ()=>{
+    const form = document.getElementById('add-batch-form');
+    form.style.display = 'block';
+    const nbExpiry = document.getElementById('nb-expiry');
+    const est = estimateExpiry(item.isFood, item.subcategory, todayISO());
+    if(est) nbExpiry.value = est;
+  });
+  document.getElementById('save-new-batch').addEventListener('click', async ()=>{
+    const qty = parseFloat(document.getElementById('nb-qty').value) || 0;
+    const expirationDate = document.getElementById('nb-expiry').value || null;
+    item.batches = item.batches || [];
+    item.batches.push({ id: uid(), quantity: qty, expirationDate });
+    warnIfSaveFailed(await saveItems(), 'this new batch');
+    openItemDetail(item.id);
+  });
+
+  document.getElementById('add-purchase').addEventListener('click', async ()=>{
+    const store = document.getElementById('np-store').value.trim();
+    const price = parseFloat(document.getElementById('np-price').value);
+    const qty = parseFloat(document.getElementById('np-qty').value) || 1;
+    const date = document.getElementById('np-date').value || todayISO();
+    const promo = document.getElementById('np-promo').value.trim();
+    if(!store || isNaN(price)) { showToast('Enter at least a store and a price paid.', {warn:true}); return; }
+    item.purchases = item.purchases || [];
+    item.purchases.push({ id: uid(), store, price, qty, date, promo });
+    warnIfSaveFailed(await saveItems(), 'this purchase record');
+    openItemDetail(item.id);
+  });
+  modalRoot.querySelectorAll('[data-del-purchase]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      item.purchases = item.purchases.filter(p=>p.id !== btn.dataset.delPurchase);
+      warnIfSaveFailed(await saveItems(), 'this purchase removal');
+      openItemDetail(item.id);
+    });
+  });
+}
+
+/* ============================= UTIL ============================= */
+function escapeHTML(str){
+  return String(str||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function escapeAttr(str){ return escapeHTML(str); }
+
+/* ============================= INIT ============================= */
+async function startApp(){
+  document.getElementById('main').innerHTML = `<div class="empty" style="margin-top:60px;"><h3>Loading your inventory...</h3></div>`;
+  await loadData();
+  setActiveNav();
+  renderMain();
+}
+function waitForGoogleLib(cb){
+  if(window.google && window.google.accounts && window.google.accounts.oauth2){ cb(); return; }
+  setTimeout(()=> waitForGoogleLib(cb), 100);
+}
+waitForGoogleLib(initGoogleAuth);
+</script>
+</body>
+</html>
