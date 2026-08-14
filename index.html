@@ -77,10 +77,12 @@
   .auth-btn:hover{background:var(--teal-dark);}
   .auth-btn:disabled{opacity:0.6;cursor:default;}
   .auth-error{background:var(--rust-fill);color:#7A3527;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-top:14px;text-align:left;}
-  .conn-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-faint);padding-left:4px;margin-bottom:6px;}
-  .conn-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);flex-shrink:0;}
+  .foot-item{display:flex;align-items:center;gap:8px;padding:6px 4px;font-size:11px;color:var(--ink-faint);cursor:pointer;border-radius:6px;}
+  .foot-item:hover{color:var(--ink);background:rgba(47,111,94,0.06);}
+  .foot-item.conn-item{cursor:default;}
+  .foot-item.conn-item:hover{background:none;color:var(--ink-faint);}
+  .conn-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);flex-shrink:0;margin-left:2px;}
   .conn-dot.offline{background:var(--rust);}
-  .sign-out-link{font-size:11px;color:var(--ink-faint);text-decoration:underline;cursor:pointer;padding-left:4px;}
 
   /* ---- Main ---- */
   #main{flex:1 1 0%;min-width:0;padding:28px 36px 60px;max-width:1180px;overflow-x:hidden;}
@@ -225,6 +227,9 @@
     #sidebar{width:64px;padding:20px 8px;}
     .brand-name,.nav-label{display:none;}
     .storage-meter-label{display:none;}
+    .foot-label{display:none;}
+    .foot-item{justify-content:center;padding:9px 0;}
+    .conn-dot{margin-left:0;}
     .nav-item{justify-content:center;}
     #main{padding:20px 16px 60px;}
     .auth-card{padding:32px 22px;}
@@ -266,9 +271,9 @@
     <div class="nav-item" data-nav="backup"><span class="nav-icon">&#8635;</span><span class="nav-label">Backup</span></div>
     <div class="nav-spacer"></div>
     <div class="sidebar-foot">
-      <div class="conn-status"><span class="conn-dot" id="conn-dot"></span><span id="conn-label">Connected to Drive</span></div>
-      <div class="sign-out-link" id="refresh-link" style="margin-bottom:2px;">Refresh from Drive</div>
-      <div class="sign-out-link" id="sign-out-link">Disconnect</div>
+      <div class="foot-item conn-item"><span class="conn-dot" id="conn-dot"></span><span class="foot-label" id="conn-label">Connected to Drive</span></div>
+      <div class="foot-item" id="refresh-link"><span class="nav-icon">&#8635;</span><span class="foot-label">Refresh from Drive</span></div>
+      <div class="foot-item" id="sign-out-link"><span class="nav-icon">&#9211;</span><span class="foot-label">Disconnect</span></div>
     </div>
   </div>
   <div id="main"></div>
