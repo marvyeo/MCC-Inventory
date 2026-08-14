@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MCC Inventory</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -226,6 +227,7 @@
     .storage-meter-label{display:none;}
     .nav-item{justify-content:center;}
     #main{padding:20px 16px 60px;}
+    .auth-card{padding:32px 22px;}
     .field-row{grid-template-columns:1fr;}
     .price-stats{grid-template-columns:1fr;}
     table.card-table thead{display:none;}
@@ -277,18 +279,35 @@
 /* ============================= GOOGLE DRIVE CONFIG =============================
    1. Go to console.cloud.google.com, create a project (or use an existing one).
    2. Enable the "Google Drive API" under APIs & Services > Library.
-   3. Go to APIs & Services > Credentials > Create Credentials > OAuth client ID.
-      - Application type: Web application
-      - Authorized JavaScript origins: add the exact URL you're hosting this file at
-        (e.g. https://yourusername.github.io)
-   4. Configure the OAuth consent screen (External, add yourself as a test user
-      if it stays in "Testing" mode — that's fine for personal use).
-   5. Copy the Client ID below.
+   3. Google Auth Platform > Data access > Add or remove scopes > add:
+        https://www.googleapis.com/auth/drive
+      (Broader than drive.file on purpose — this is what lets a SECOND person's
+      account read/write files that the PRIMARY user owns and shares with them.
+      drive.file alone can only ever see files that same account created itself.)
+   4. Google Auth Platform > Audience > add every person's email as a test user.
+   5. Google Auth Platform > Clients > Create Client > Web application >
+      Authorized JavaScript origins = the exact URL you're hosting this file at.
+   6. Copy the Client ID below.
+
+   SHARED-DATA SETUP (one-time, done by the PRIMARY user only):
+   a. Leave DRIVE_FILE_ID_LOCATIONS / DRIVE_FILE_ID_ITEMS blank below and deploy.
+   b. Sign in as the primary user and use the app once — since no file ID is
+      configured yet, it will create the two data files under YOUR Drive and
+      then show you a one-time setup screen with both file IDs.
+   c. Paste those two IDs into the constants below, commit, redeploy.
+   d. In Google Drive itself, find those two files (search their file names)
+      and Share each with every other user's email as Editor.
+   e. From then on, EVERYONE (including you) reads/writes those exact two
+      files directly by ID — no ambiguity, no risk of someone accidentally
+      creating their own separate copy.
 ================================================================================= */
-const GOOGLE_CLIENT_ID = '676510183503-02v1ruuds1e7b1b7bqu1rt602bl6ub06.apps.googleusercontent.com';
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const DRIVE_FILE_LOCATIONS = 'mcc-inventory-locations.json';
 const DRIVE_FILE_ITEMS = 'mcc-inventory-items.json';
+// Fill these in after step (c) above. Leave blank for first-run/primary-user setup.
+const DRIVE_FILE_ID_LOCATIONS = '';
+const DRIVE_FILE_ID_ITEMS = '';
 
 let driveAccessToken = null;
 let driveTokenExpiresAt = 0;
@@ -392,7 +411,13 @@ async function ensureFreshToken(){
   });
 }
 
-/* ---- Drive file read/write, replacing window.storage.get/set ---- */
+/* ---- Drive file read/write, replacing window.storage.get/set ----
+   If an explicit file ID is configured (DRIVE_FILE_ID_*), we always read/write
+   that exact file directly — this is what makes multi-user shared access work,
+   since every signed-in user hits the same file regardless of who owns it.
+   If no ID is configured yet, we fall back to find-by-name-or-create, which is
+   only meant for the primary user's very first run. */
+let newlyCreatedFileIds = {};
 async function driveFindFileId(name){
   const res = await fetch(
     `https://www.googleapis.com/drive/v3/files?q=name%3D%27${encodeURIComponent(name)}%27+and+trashed%3Dfalse&spaces=drive&fields=files(id,name)`,
@@ -402,9 +427,9 @@ async function driveFindFileId(name){
   const data = await res.json();
   return (data.files && data.files.length) ? data.files[0].id : null;
 }
-async function driveReadFile(name){
+async function driveReadFile(name, explicitId){
   await ensureFreshToken();
-  const id = await driveFindFileId(name);
+  const id = explicitId || await driveFindFileId(name);
   if(!id) return null;
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, {
     headers: { Authorization: `Bearer ${driveAccessToken}` }
@@ -412,9 +437,9 @@ async function driveReadFile(name){
   if(!res.ok) throw new Error('Drive read failed: ' + res.status);
   return await res.text();
 }
-async function driveWriteFile(name, content){
+async function driveWriteFile(name, content, explicitId){
   await ensureFreshToken();
-  const id = await driveFindFileId(name);
+  const id = explicitId || await driveFindFileId(name);
   if(id){
     const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, {
       method: 'PATCH',
@@ -435,7 +460,18 @@ async function driveWriteFile(name, content){
       body
     });
     if(!res.ok) throw new Error('Drive create failed: ' + res.status);
+    const created = await res.json();
+    newlyCreatedFileIds[name] = created.id;
   }
+}
+function maybeShowFirstRunSetup(){
+  const names = Object.keys(newlyCreatedFileIds);
+  if(!names.length) return;
+  const rows = names.map(n=> `<div class="mono" style="background:var(--surface-alt);padding:8px 10px;border-radius:6px;margin-bottom:6px;font-size:12px;word-break:break-all;"><strong>${escapeHTML(n)}</strong><br>${escapeHTML(newlyCreatedFileIds[n])}</div>`).join('');
+  showAlertModal('First-time setup — one more step',
+    `New data files were just created in your Drive. To let other people share this same data, copy these file IDs into DRIVE_FILE_ID_LOCATIONS / DRIVE_FILE_ID_ITEMS near the top of index.html, redeploy, then in Google Drive share these two files (Editor access) with anyone else who needs access:<br><br>${rows}`
+  );
+  newlyCreatedFileIds = {};
 }
 
 /* ============================= STATE ============================= */
@@ -456,11 +492,11 @@ const fmtMoney = (n) => '$' + Number(n).toFixed(2);
 async function loadData(){
   let locFailed = false, itemsFailed = false;
   try{
-    const locRaw = await driveReadFile(DRIVE_FILE_LOCATIONS);
+    const locRaw = await driveReadFile(DRIVE_FILE_LOCATIONS, DRIVE_FILE_ID_LOCATIONS || null);
     state.locations = locRaw ? JSON.parse(locRaw) : [];
   }catch(e){ console.error('load locations failed', e); state.locations = []; locFailed = true; }
   try{
-    const itemsRaw = await driveReadFile(DRIVE_FILE_ITEMS);
+    const itemsRaw = await driveReadFile(DRIVE_FILE_ITEMS, DRIVE_FILE_ID_ITEMS || null);
     state.items = itemsRaw ? JSON.parse(itemsRaw) : [];
   }catch(e){ console.error('load items failed', e); state.items = []; itemsFailed = true; }
   updateConnStatus(!(locFailed || itemsFailed));
@@ -477,11 +513,11 @@ async function loadData(){
   });
   state.loaded = true;
 }
-async function driveWriteWithRetry(name, content, attempts=3, delayMs=900){
+async function driveWriteWithRetry(name, content, explicitId, attempts=3, delayMs=900){
   let lastErr;
   for(let i=0;i<attempts;i++){
     try{
-      await driveWriteFile(name, content);
+      await driveWriteFile(name, content, explicitId);
       return true;
     }catch(e){
       lastErr = e;
@@ -492,8 +528,9 @@ async function driveWriteWithRetry(name, content, attempts=3, delayMs=900){
 }
 async function saveLocations(){
   try{
-    await driveWriteWithRetry(DRIVE_FILE_LOCATIONS, JSON.stringify(state.locations));
+    await driveWriteWithRetry(DRIVE_FILE_LOCATIONS, JSON.stringify(state.locations), DRIVE_FILE_ID_LOCATIONS || null);
     updateConnStatus(true);
+    maybeShowFirstRunSetup();
     return true;
   }catch(e){
     console.error('save locations failed', e);
@@ -504,8 +541,9 @@ async function saveLocations(){
 async function saveItems(){
   const payload = JSON.stringify(state.items);
   try{
-    await driveWriteWithRetry(DRIVE_FILE_ITEMS, payload);
+    await driveWriteWithRetry(DRIVE_FILE_ITEMS, payload, DRIVE_FILE_ID_ITEMS || null);
     updateConnStatus(true);
+    maybeShowFirstRunSetup();
     return true;
   }catch(e){
     console.error('save items failed', e);
