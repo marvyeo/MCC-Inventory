@@ -267,6 +267,7 @@
     <div class="nav-spacer"></div>
     <div class="sidebar-foot">
       <div class="conn-status"><span class="conn-dot" id="conn-dot"></span><span id="conn-label">Connected to Drive</span></div>
+      <div class="sign-out-link" id="refresh-link" style="margin-bottom:2px;">Refresh from Drive</div>
       <div class="sign-out-link" id="sign-out-link">Disconnect</div>
     </div>
   </div>
@@ -1750,6 +1751,39 @@ async function startApp(){
   await loadData();
   setActiveNav();
   renderMain();
+  wireRefreshControls();
+}
+let refreshInFlight = false;
+async function refreshFromDrive(silent){
+  if(refreshInFlight) return;
+  // Don't clobber an in-progress edit — skip auto-refreshes while a modal is open.
+  // A manual click still works (it'll just be a no-op with a toast telling you why).
+  if(modalRoot.classList.contains('open')){
+    if(!silent) showToast("Close the open form first, then refresh — didn't want to overwrite what you're editing.", {warn:true});
+    return;
+  }
+  refreshInFlight = true;
+  try{
+    await loadData();
+    renderMain();
+    if(!silent) showToast('Refreshed from Drive.', {duration:2000});
+  } finally {
+    refreshInFlight = false;
+  }
+}
+function wireRefreshControls(){
+  const link = document.getElementById('refresh-link');
+  if(link) link.addEventListener('click', ()=> refreshFromDrive(false));
+
+  // Auto-refresh whenever you come back to this tab/app — this is what makes
+  // "I changed it on my phone, now check my laptop" actually show up, without
+  // constantly polling Drive in the background while you're not even looking.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible' && driveAccessToken) refreshFromDrive(true);
+  });
+  window.addEventListener('focus', ()=>{
+    if(driveAccessToken) refreshFromDrive(true);
+  });
 }
 function waitForGoogleLib(cb){
   if(window.google && window.google.accounts && window.google.accounts.oauth2){ cb(); return; }
