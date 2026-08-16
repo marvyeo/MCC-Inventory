@@ -626,6 +626,129 @@ async function handleImportBackup(e){
   );
 }
 
+async function handleImportReceiptChanges(e){
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  let data;
+  try{
+    const text = await file.text();
+    data = JSON.parse(text);
+  }catch(err){
+    showAlertModal('Import failed', "Could not read that file — make sure it's a receipt-changes JSON file from Receipt Reader.");
+    return;
+  }
+  if(!data || !Array.isArray(data.changes)){
+    showAlertModal('Import failed', "That file doesn't look like a valid receipt-changes file (missing a changes list).");
+    return;
+  }
+
+  // Preview counts before touching anything.
+  let priceOnlyCount = 0, priceAndBatchCount = 0, newItemCount = 0, missingItemCount = 0;
+  const missingItemNames = [];
+  data.changes.forEach(c=>{
+    if(c.action === 'add-batch'){
+      const item = state.items.find(i=>i.id===c.itemId);
+      if(!item){ missingItemCount++; missingItemNames.push(c.itemId); return; }
+      if(c.batch) priceAndBatchCount++; else priceOnlyCount++;
+    } else if(c.action === 'create-item'){
+      newItemCount++;
+      if(c.batch) priceAndBatchCount++; else priceOnlyCount++;
+    }
+  });
+
+  const receiptList = (data.receipts||[]).map(r=>{
+    const label = r.marketplace ? `${r.marketplace} — ${r.seller}` : r.seller;
+    return `<div class="faint">${escapeHTML(label||'Unknown')} · ${escapeHTML(r.date||'')} (${r.lineCount||0} line${r.lineCount===1?'':'s'})</div>`;
+  }).join('');
+
+  showConfirmModal(
+    'Import receipt changes?',
+    `From ${data.receipts?.length||0} receipt${data.receipts?.length===1?'':'s'}:<br>${receiptList}<br><br>
+     This will:<br>
+     ${newItemCount ? `• Create <strong>${newItemCount}</strong> new item${newItemCount===1?'':'s'}<br>` : ''}
+     ${priceAndBatchCount ? `• Log price history <strong>and</strong> add a stock batch for <strong>${priceAndBatchCount}</strong> line${priceAndBatchCount===1?'':'s'}<br>` : ''}
+     ${priceOnlyCount ? `• Log price history <strong>only</strong> (no stock change) for <strong>${priceOnlyCount}</strong> line${priceOnlyCount===1?'':'s'}<br>` : ''}
+     ${missingItemCount ? `<br><span class="faint" style="color:var(--rust);">${missingItemCount} line${missingItemCount===1?'':'s'} reference an item that doesn't exist here and will be skipped — likely a mismatch between which inventory file was used for matching.</span>` : ''}
+     <br><span class="faint">Everything else in your inventory stays untouched.</span>`,
+    'Import changes',
+    async ()=>{
+      closeModal();
+      let created = 0, updated = 0, batchesAdded = 0, skipped = 0;
+      data.changes.forEach(c=>{
+        const purchaseDate = c.purchase?.date || todayISO();
+        const purchaseRecord = {
+          id: uid(),
+          store: c.purchase?.store || '',
+          price: c.purchase?.price ?? 0,
+          qty: c.purchase?.qty ?? 1,
+          date: purchaseDate,
+          promo: c.purchase?.promo || ''
+        };
+        if(c.purchase?.pricing && c.purchase.pricing.basis === 'weight'){
+          purchaseRecord.pricingBasis = 'weight';
+          purchaseRecord.packageWeight = c.purchase.pricing.packageWeight;
+          purchaseRecord.packageWeightUnit = c.purchase.pricing.packageWeightUnit;
+          purchaseRecord.pricePerBaseUnit = c.purchase.pricing.pricePerBaseUnit;
+        }
+
+        if(c.action === 'add-batch'){
+          const item = state.items.find(i=>i.id===c.itemId);
+          if(!item){ skipped++; return; }
+          item.purchases = item.purchases || [];
+          item.purchases.push(purchaseRecord);
+          if(purchaseRecord.pricingBasis === 'weight'){
+            item.priceTrackingBasis = 'weight';
+            item.packageWeight = purchaseRecord.packageWeight;
+            item.packageWeightUnit = purchaseRecord.packageWeightUnit;
+          }
+          if(c.batch){
+            const expirationDate = c.batch.expirationDate || estimateExpiry(item.isFood, item.subcategory, purchaseDate);
+            item.batches = item.batches || [];
+            item.batches.push({ id: uid(), quantity: c.batch.quantity, expirationDate });
+            batchesAdded++;
+          }
+          updated++;
+        } else if(c.action === 'create-item'){
+          const newItem = {
+            id: c.tempId || uid(),
+            name: c.item?.name || 'Unnamed item',
+            brand: c.item?.brand || '',
+            isFood: !!c.item?.isFood,
+            subcategory: c.item?.subcategory || '',
+            locationId: c.item?.locationId || '',
+            unit: c.item?.unit || 'pcs',
+            photo: null,
+            batches: [],
+            purchases: [purchaseRecord]
+          };
+          if(purchaseRecord.pricingBasis === 'weight'){
+            newItem.priceTrackingBasis = 'weight';
+            newItem.packageWeight = purchaseRecord.packageWeight;
+            newItem.packageWeightUnit = purchaseRecord.packageWeightUnit;
+          }
+          if(c.batch){
+            const expirationDate = c.batch.expirationDate || estimateExpiry(newItem.isFood, newItem.subcategory, purchaseDate);
+            newItem.batches.push({ id: uid(), quantity: c.batch.quantity, expirationDate });
+            batchesAdded++;
+          }
+          state.items.push(newItem);
+          created++;
+        }
+      });
+
+      const ok = await saveItems();
+      renderMain();
+      const summary = `Created ${created} item${created===1?'':'s'}, updated ${updated} existing item${updated===1?'':'s'} (${batchesAdded} new batch${batchesAdded===1?'':'es'} added)${skipped?`, skipped ${skipped} line${skipped===1?'':'s'} with no matching item`:''}.`;
+      if(ok){
+        showAlertModal('Import complete', summary + ' Saved successfully.');
+      } else {
+        showAlertModal('Imported, but not saved', summary + ' However, saving failed right now — it looks correct on screen but may not be persisted yet. Try again shortly.');
+      }
+    }
+  );
+}
+
 /* ============================= EXPIRY ESTIMATES ============================= */
 const EXPIRY_DAYS = {
   food: {
@@ -715,18 +838,39 @@ function thumbHTML(item){
 }
 
 /* ============================= PRICE STATS ============================= */
+function itemUnitLabel(item){
+  if(item.priceTrackingBasis === 'weight'){
+    const u = item.packageWeightUnit;
+    return (u === 'ml' || u === 'l') ? '/L' : '/kg';
+  }
+  return '';
+}
+function normalizePurchasePrice(item, purchase){
+  if(item.priceTrackingBasis === 'weight'){
+    if(purchase.pricePerBaseUnit != null) return purchase.pricePerBaseUnit;
+    // Fallback for older/manually-added purchases with no per-unit figure of their own —
+    // use the item's canonical package size, assuming consistent packaging.
+    if(item.packageWeight){
+      const baseUnits = (item.packageWeightUnit==='kg'||item.packageWeightUnit==='l') ? item.packageWeight*1000 : item.packageWeight;
+      const totalUnits = baseUnits * (purchase.qty||1);
+      if(totalUnits > 0) return (purchase.price/totalUnits) * 1000;
+    }
+  }
+  return purchase.price / (purchase.qty || 1);
+}
 function priceStats(item){
   const p = item.purchases || [];
   if(!p.length) return null;
-  const unitPrices = p.map(x => x.price / (x.qty || 1));
+  const unitPrices = p.map(x => normalizePurchasePrice(item, x));
   const avg = unitPrices.reduce((a,b)=>a+b,0)/unitPrices.length;
   let minIdx = 0;
   unitPrices.forEach((v,i)=>{ if(v < unitPrices[minIdx]) minIdx = i; });
   const sorted = [...p].sort((a,b)=> new Date(b.date)-new Date(a.date));
-  const latestUnit = sorted[0].price / (sorted[0].qty||1);
+  const latestUnit = normalizePurchasePrice(item, sorted[0]);
   return {
     avg, min: unitPrices[minIdx], minStore: p[minIdx].store, minDate: p[minIdx].date,
-    latest: latestUnit, latestStore: sorted[0].store, count: p.length
+    latest: latestUnit, latestStore: sorted[0].store, count: p.length,
+    unitLabel: itemUnitLabel(item)
   };
 }
 
@@ -980,7 +1124,7 @@ function itemRowHTML(i){
     <td data-label="Qty" class="num">${itemTotalQty(i)} ${escapeHTML(i.unit||'')}</td>
     <td data-label="Status">${statusCell}</td>
     <td data-label="Freshness">${outOfStock ? '<span class="faint">—</span>' : freshBarHTML(f)}</td>
-    <td data-label="Best price" class="num">${stats ? fmtMoney(stats.min) : '—'}</td>
+    <td data-label="Best price" class="num">${stats ? fmtMoney(stats.min)+stats.unitLabel : '—'}</td>
   </tr>`;
 }
 function itemsTableHTML(list){
@@ -1045,10 +1189,15 @@ function backupViewHTML(){
         <button class="btn btn-sm" data-action="export-backup-nophotos">⬇ Backup without photos (smaller file)</button>
       </div>
     </div>
-    <div class="card">
+    <div class="card" style="margin-bottom:18px;">
       <p class="metric-label" style="margin:0 0 4px;">Restore from a backup</p>
       <p class="faint" style="margin:0 0 14px;">Replaces everything currently in the app with the contents of a backup file. You'll be asked to confirm before anything is overwritten.</p>
       <div class="file-btn" style="display:inline-block;"><button type="button" class="btn btn-sm">⬆ Choose backup file to restore</button><input id="import-backup-input" type="file" accept="application/json,.json"></div>
+    </div>
+    <div class="card">
+      <p class="metric-label" style="margin:0 0 4px;">Import receipt changes</p>
+      <p class="faint" style="margin:0 0 14px;">Merges a receipt-changes file from Receipt Reader in — logs purchase/price history on matched items, adds stock batches where the file says to, and creates any genuinely new items. Doesn't touch anything else. You'll see a summary to confirm before anything is applied.</p>
+      <div class="file-btn" style="display:inline-block;"><button type="button" class="btn btn-sm">⬆ Choose receipt-changes file</button><input id="import-receipt-input" type="file" accept="application/json,.json"></div>
     </div>
   `;
 }
@@ -1165,6 +1314,8 @@ function attachMainEvents(){
     if(exportNoPhotosBtn) exportNoPhotosBtn.addEventListener('click', ()=> exportBackup(false));
     const importInput = document.getElementById('import-backup-input');
     if(importInput) importInput.addEventListener('change', handleImportBackup);
+    const importReceiptInput = document.getElementById('import-receipt-input');
+    if(importReceiptInput) importReceiptInput.addEventListener('change', handleImportReceiptChanges);
   }
   if(state.view==='expired' || state.view==='lowstock' || state.view==='outofstock'){
     document.querySelectorAll('[data-action="open-item"]').forEach(el=> el.addEventListener('click', ()=> openItemDetail(el.dataset.id)));
@@ -1587,15 +1738,41 @@ function openItemDetail(id, isFoodOverride){
       </div>
 
       <div class="detail-section">
-        <p class="detail-label">Price insights</p>
+        <p class="detail-label">Price insights${item.priceTrackingBasis==='weight' ? ` <span class="faint">(tracked by weight — ${escapeHTML(itemUnitLabel(item))})</span>` : ''}</p>
         ${ stats ? `
         <div class="price-stats">
-          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.min)}</div><div class="price-stat-lab">Best price seen (${escapeHTML(stats.minStore)})</div></div>
-          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.avg)}</div><div class="price-stat-lab">Average price / unit</div></div>
-          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.latest)}</div><div class="price-stat-lab">Most recent (${escapeHTML(stats.latestStore)})</div></div>
+          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.min)}${stats.unitLabel}</div><div class="price-stat-lab">Best price seen (${escapeHTML(stats.minStore)})</div></div>
+          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.avg)}${stats.unitLabel}</div><div class="price-stat-lab">Average price${stats.unitLabel||' / unit'}</div></div>
+          <div class="price-stat"><div class="price-stat-val">${fmtMoney(stats.latest)}${stats.unitLabel}</div><div class="price-stat-lab">Most recent (${escapeHTML(stats.latestStore)})</div></div>
         </div>
-        <p class="faint">Based on ${stats.count} purchase${stats.count===1?'':'s'}. A reasonable price to stock up at or below: <strong class="mono">${fmtMoney(stats.min)}</strong> per unit.</p>
+        <p class="faint">Based on ${stats.count} purchase${stats.count===1?'':'s'}. A reasonable price to stock up at or below: <strong class="mono">${fmtMoney(stats.min)}${stats.unitLabel}</strong>.</p>
         ` : `<p class="faint">No purchase history yet. Add one below to start tracking pricing.</p>` }
+      </div>
+
+      <div class="detail-section">
+        <p class="detail-label">Price tracking measure</p>
+        <div class="field-row">
+          <div class="field">
+            <label>Track price by</label>
+            <select id="d-price-basis">
+              <option value="pack" ${item.priceTrackingBasis!=='weight'?'selected':''}>Per pack/unit ($ each)</option>
+              <option value="weight" ${item.priceTrackingBasis==='weight'?'selected':''}>Per weight/volume ($/kg or $/L)</option>
+            </select>
+          </div>
+          <div class="field" id="d-package-weight-wrap" style="${item.priceTrackingBasis==='weight'?'':'display:none;'}">
+            <label>Package size</label>
+            <div style="display:flex;gap:6px;">
+              <input type="number" step="1" id="d-package-weight" placeholder="e.g. 200" value="${item.packageWeight!=null?item.packageWeight:''}" style="flex:1;">
+              <select id="d-package-weight-unit" style="flex:1;">
+                <option value="g" ${item.packageWeightUnit==='g'?'selected':''}>g</option>
+                <option value="kg" ${item.packageWeightUnit==='kg'?'selected':''}>kg</option>
+                <option value="ml" ${item.packageWeightUnit==='ml'?'selected':''}>ml</option>
+                <option value="l" ${item.packageWeightUnit==='l'?'selected':''}>l</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <p class="faint" style="margin-top:-6px;">Used as the fallback for any purchase record that didn't already come with its own per-weight price (e.g. ones added manually here rather than via Receipt Reader).</p>
       </div>
 
       <div class="detail-section">
@@ -1639,7 +1816,10 @@ function openItemDetail(id, isFoodOverride){
         brand: document.getElementById('d-brand').value,
         location: document.getElementById('d-location').value,
         unit: document.getElementById('d-unit').value,
-        par: document.getElementById('d-par').value
+        par: document.getElementById('d-par').value,
+        priceBasis: document.getElementById('d-price-basis').value,
+        pkgWeight: document.getElementById('d-package-weight').value,
+        pkgWeightUnit: document.getElementById('d-package-weight-unit').value
       };
       openItemDetail(item.id, nowFood);
       document.getElementById('d-name').value = preserved.name;
@@ -1647,7 +1827,16 @@ function openItemDetail(id, isFoodOverride){
       document.getElementById('d-location').value = preserved.location;
       document.getElementById('d-unit').value = preserved.unit;
       document.getElementById('d-par').value = preserved.par;
+      document.getElementById('d-price-basis').value = preserved.priceBasis;
+      document.getElementById('d-package-weight').value = preserved.pkgWeight;
+      document.getElementById('d-package-weight-unit').value = preserved.pkgWeightUnit;
+      document.getElementById('d-package-weight-wrap').style.display = preserved.priceBasis==='weight' ? '' : 'none';
     });
+  });
+
+  const priceBasisSelect = document.getElementById('d-price-basis');
+  if(priceBasisSelect) priceBasisSelect.addEventListener('change', ()=>{
+    document.getElementById('d-package-weight-wrap').style.display = priceBasisSelect.value==='weight' ? '' : 'none';
   });
 
   async function handleDetailPhotoInput(e){
@@ -1674,6 +1863,15 @@ function openItemDetail(id, isFoodOverride){
     item.unit = document.getElementById('d-unit').value.trim();
     const parVal = document.getElementById('d-par').value;
     item.parLevel = parVal !== '' ? parseFloat(parVal) : null;
+    item.priceTrackingBasis = document.getElementById('d-price-basis').value;
+    if(item.priceTrackingBasis === 'weight'){
+      const pw = document.getElementById('d-package-weight').value;
+      item.packageWeight = pw !== '' ? parseFloat(pw) : null;
+      item.packageWeightUnit = document.getElementById('d-package-weight-unit').value;
+    } else {
+      item.packageWeight = null;
+      item.packageWeightUnit = null;
+    }
     warnIfSaveFailed(await saveItems(), 'these changes');
     closeModal(); renderMain();
   });
