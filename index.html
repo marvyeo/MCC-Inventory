@@ -486,7 +486,8 @@ const state = {
   items: [],
   view: 'dashboard',
   filter: { search:'', locationId:'', category:'', status:'', subcategory:'' },
-  loaded: false
+  loaded: false,
+  pendingImport: null
 };
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2)+Date.now());
@@ -643,110 +644,221 @@ async function handleImportReceiptChanges(e){
     return;
   }
 
-  // Preview counts before touching anything.
-  let priceOnlyCount = 0, priceAndBatchCount = 0, newItemCount = 0, missingItemCount = 0;
-  const missingItemNames = [];
-  data.changes.forEach(c=>{
+  const lines = data.changes.map(c=>{
+    const purchaseDate = c.purchase?.date || todayISO();
+    const base = {
+      raw: c,
+      action: c.action,
+      itemId: c.itemId || null,
+      tempId: c.tempId || null,
+      store: c.purchase?.store || '',
+      price: c.purchase?.price ?? 0,
+      qty: c.purchase?.qty ?? 1,
+      date: purchaseDate,
+      promo: c.purchase?.promo || '',
+      pricingBasis: c.purchase?.pricing?.basis || 'pack',
+      packageWeight: c.purchase?.pricing?.packageWeight ?? null,
+      packageWeightUnit: c.purchase?.pricing?.packageWeightUnit ?? null,
+      pricePerBaseUnit: c.purchase?.pricing?.pricePerBaseUnit ?? null,
+      wantsBatch: !!c.batch,
+      include: true
+    };
     if(c.action === 'add-batch'){
       const item = state.items.find(i=>i.id===c.itemId);
-      if(!item){ missingItemCount++; missingItemNames.push(c.itemId); return; }
-      if(c.batch) priceAndBatchCount++; else priceOnlyCount++;
-    } else if(c.action === 'create-item'){
-      newItemCount++;
-      if(c.batch) priceAndBatchCount++; else priceOnlyCount++;
+      base.isMissing = !item;
+      base.existingName = item ? `${item.name}${item.brand?` — ${item.brand}`:''}` : null;
+      base.existingLocation = item ? locationNameById(item.locationId) : null;
+      if(base.isMissing) base.include = false;
+    } else {
+      base.newName = c.item?.name || '';
+      base.newBrand = c.item?.brand || '';
+      base.newIsFood = !!c.item?.isFood;
+      base.newSubcategory = c.item?.subcategory || '';
+      base.newLocationId = c.item?.locationId || '';
+      base.newUnit = c.item?.unit || 'pcs';
+    }
+    return base;
+  });
+
+  state.pendingImport = { data, lines };
+  state.view = 'importReview';
+  setActiveNav();
+  renderMain();
+}
+
+function locationNameById(id){
+  const loc = state.locations.find(l=>l.id===id);
+  return loc ? loc.name : '(missing location)';
+}
+
+function importReviewViewHTML(){
+  const pi = state.pendingImport;
+  if(!pi) return `<div class="topbar"><h1 class="page-title">Import Receipt Changes</h1></div><div class="empty"><h3>Nothing to review</h3><p>Go to Backup and choose a receipt-changes file to import.</p></div>`;
+
+  const receiptList = (pi.data.receipts||[]).map(r=>{
+    const label = r.marketplace ? `${r.marketplace} — ${r.seller}` : r.seller;
+    return `<span class="tag tag-gray">${escapeHTML(label||'Unknown')} · ${escapeHTML(r.date||'')}</span>`;
+  }).join(' ');
+
+  const rows = pi.lines.map((l,idx)=> importReviewRowHTML(l, idx)).join('');
+
+  return `
+    <div class="topbar"><h1 class="page-title">Review Receipt Import</h1></div>
+    <p class="faint" style="margin-top:-8px;">From: ${receiptList}</p>
+    <p class="faint">Check every line before importing — nothing is applied to your inventory until you confirm at the bottom. Uncheck "Include" to skip a line entirely.</p>
+    <table class="wrap-card card-table">
+      <thead><tr><th>Item</th><th>Qty</th><th>Price paid</th><th>Add to stock?</th><th>Include</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="modal-actions" style="border-top:none;padding-top:16px;justify-content:flex-start;">
+      <button class="btn btn-primary" id="btn-confirm-import">Import reviewed changes</button>
+      <button class="btn" id="btn-cancel-import">Cancel</button>
+    </div>
+  `;
+}
+
+function importReviewRowHTML(line, idx){
+  const priceLabel = line.pricingBasis==='weight' ? (line.packageWeightUnit==='ml'||line.packageWeightUnit==='l' ? '/L' : '/kg') : '';
+  let itemCell;
+  if(line.action === 'add-batch'){
+    if(line.isMissing){
+      itemCell = `<div><span class="tag tag-rust">⚠ Item not found</span></div><div class="faint mono" style="margin-top:3px;">${escapeHTML(line.itemId||'')}</div><div class="faint">This item ID doesn't exist in your current inventory — will be skipped.</div>`;
+    } else {
+      itemCell = `<div><strong>${escapeHTML(line.existingName)}</strong></div><div class="faint">Existing item · ${escapeHTML(line.existingLocation||'')}</div>`;
+    }
+  } else {
+    const subcatOpts = subcategoryOptions(line.newIsFood);
+    itemCell = `
+      <div class="tag tag-teal" style="margin-bottom:6px;">New item</div>
+      <input type="text" class="ri-new-name" placeholder="Item name" value="${escapeAttr(line.newName)}" style="margin-bottom:5px;">
+      <input type="text" class="ri-new-brand" placeholder="Brand (optional)" value="${escapeAttr(line.newBrand)}" style="margin-bottom:5px;">
+      <div style="display:flex;gap:5px;margin-bottom:5px;">
+        <select class="ri-new-isfood" style="flex:1;">
+          <option value="true" ${line.newIsFood?'selected':''}>Food</option>
+          <option value="false" ${!line.newIsFood?'selected':''}>Non-food</option>
+        </select>
+        <select class="ri-new-subcat" style="flex:1;">
+          ${subcatOpts.map(s=>`<option ${line.newSubcategory===s?'selected':''}>${escapeHTML(s)}</option>`).join('')}
+        </select>
+      </div>
+      <select class="ri-new-location" style="margin-bottom:5px;">
+        ${state.locations.map(l=>`<option value="${l.id}" ${line.newLocationId===l.id?'selected':''}>${escapeHTML(l.name)}</option>`).join('')}
+      </select>
+      <input type="text" class="ri-new-unit" placeholder="Unit" value="${escapeAttr(line.newUnit)}">
+    `;
+  }
+  return `
+  <tr data-idx="${idx}" style="${line.isMissing?'opacity:0.6;':''}">
+    <td data-label="Item">${itemCell}</td>
+    <td data-label="Qty"><input type="number" step="0.01" class="ri-qty" value="${line.qty}" ${line.isMissing?'disabled':''}></td>
+    <td data-label="Price paid"><input type="number" step="0.01" class="ri-price" value="${Number(line.price).toFixed(2)}" ${line.isMissing?'disabled':''}>${priceLabel?`<div class="faint">${priceLabel}</div>`:''}</td>
+    <td data-label="Add to stock?"><input type="checkbox" class="ri-batch" ${line.wantsBatch?'checked':''} ${line.isMissing?'disabled':''}></td>
+    <td data-label="Include"><input type="checkbox" class="ri-include" ${line.include?'checked':''} ${line.isMissing?'disabled':''}></td>
+  </tr>`;
+}
+
+function wireImportReview(){
+  const pi = state.pendingImport;
+  if(!pi) return;
+  document.querySelectorAll('#main tr[data-idx]').forEach(row=>{
+    const idx = parseInt(row.dataset.idx, 10);
+    const line = pi.lines[idx];
+    const q = row.querySelector('.ri-qty'); if(q) q.addEventListener('change', ()=>{ line.qty = parseFloat(q.value)||0; });
+    const p = row.querySelector('.ri-price'); if(p) p.addEventListener('change', ()=>{ line.price = parseFloat(p.value)||0; });
+    const b = row.querySelector('.ri-batch'); if(b) b.addEventListener('change', ()=>{ line.wantsBatch = b.checked; });
+    const inc = row.querySelector('.ri-include'); if(inc) inc.addEventListener('change', ()=>{ line.include = inc.checked; });
+    const nn = row.querySelector('.ri-new-name'); if(nn) nn.addEventListener('change', ()=>{ line.newName = nn.value; });
+    const nb = row.querySelector('.ri-new-brand'); if(nb) nb.addEventListener('change', ()=>{ line.newBrand = nb.value; });
+    const nf = row.querySelector('.ri-new-isfood'); if(nf) nf.addEventListener('change', ()=>{ line.newIsFood = nf.value==='true'; line.newSubcategory = subcategoryOptions(line.newIsFood)[0]; renderMain(); });
+    const ns = row.querySelector('.ri-new-subcat'); if(ns) ns.addEventListener('change', ()=>{ line.newSubcategory = ns.value; });
+    const nl = row.querySelector('.ri-new-location'); if(nl) nl.addEventListener('change', ()=>{ line.newLocationId = nl.value; });
+    const nu = row.querySelector('.ri-new-unit'); if(nu) nu.addEventListener('change', ()=>{ line.newUnit = nu.value; });
+  });
+
+  const confirmBtn = document.getElementById('btn-confirm-import');
+  if(confirmBtn) confirmBtn.addEventListener('click', applyReviewedImport);
+  const cancelBtn = document.getElementById('btn-cancel-import');
+  if(cancelBtn) cancelBtn.addEventListener('click', ()=>{
+    state.pendingImport = null;
+    state.view = 'backup';
+    setActiveNav();
+    renderMain();
+  });
+}
+
+async function applyReviewedImport(){
+  const pi = state.pendingImport;
+  if(!pi) return;
+  let created = 0, updated = 0, batchesAdded = 0, skippedCount = 0;
+
+  pi.lines.forEach(line=>{
+    if(!line.include) { skippedCount++; return; }
+    const purchaseRecord = {
+      id: uid(), store: line.store, price: line.price, qty: line.qty, date: line.date, promo: line.promo
+    };
+    if(line.pricingBasis === 'weight'){
+      purchaseRecord.pricingBasis = 'weight';
+      purchaseRecord.packageWeight = line.packageWeight;
+      purchaseRecord.packageWeightUnit = line.packageWeightUnit;
+      purchaseRecord.pricePerBaseUnit = line.pricePerBaseUnit;
+    }
+
+    if(line.action === 'add-batch'){
+      const item = state.items.find(i=>i.id===line.itemId);
+      if(!item) { skippedCount++; return; }
+      item.purchases = item.purchases || [];
+      item.purchases.push(purchaseRecord);
+      if(purchaseRecord.pricingBasis === 'weight'){
+        item.priceTrackingBasis = 'weight';
+        item.packageWeight = purchaseRecord.packageWeight;
+        item.packageWeightUnit = purchaseRecord.packageWeightUnit;
+      }
+      if(line.wantsBatch){
+        const expirationDate = estimateExpiry(item.isFood, item.subcategory, line.date);
+        item.batches = item.batches || [];
+        item.batches.push({ id: uid(), quantity: line.qty, expirationDate });
+        batchesAdded++;
+      }
+      updated++;
+    } else {
+      const newItem = {
+        id: line.tempId || uid(),
+        name: line.newName || 'Unnamed item',
+        brand: line.newBrand || '',
+        isFood: line.newIsFood,
+        subcategory: line.newSubcategory,
+        locationId: line.newLocationId,
+        unit: line.newUnit || 'pcs',
+        photo: null,
+        batches: [],
+        purchases: [purchaseRecord]
+      };
+      if(purchaseRecord.pricingBasis === 'weight'){
+        newItem.priceTrackingBasis = 'weight';
+        newItem.packageWeight = purchaseRecord.packageWeight;
+        newItem.packageWeightUnit = purchaseRecord.packageWeightUnit;
+      }
+      if(line.wantsBatch){
+        const expirationDate = estimateExpiry(newItem.isFood, newItem.subcategory, line.date);
+        newItem.batches.push({ id: uid(), quantity: line.qty, expirationDate });
+        batchesAdded++;
+      }
+      state.items.push(newItem);
+      created++;
     }
   });
 
-  const receiptList = (data.receipts||[]).map(r=>{
-    const label = r.marketplace ? `${r.marketplace} — ${r.seller}` : r.seller;
-    return `<div class="faint">${escapeHTML(label||'Unknown')} · ${escapeHTML(r.date||'')} (${r.lineCount||0} line${r.lineCount===1?'':'s'})</div>`;
-  }).join('');
-
-  showConfirmModal(
-    'Import receipt changes?',
-    `From ${data.receipts?.length||0} receipt${data.receipts?.length===1?'':'s'}:<br>${receiptList}<br><br>
-     This will:<br>
-     ${newItemCount ? `• Create <strong>${newItemCount}</strong> new item${newItemCount===1?'':'s'}<br>` : ''}
-     ${priceAndBatchCount ? `• Log price history <strong>and</strong> add a stock batch for <strong>${priceAndBatchCount}</strong> line${priceAndBatchCount===1?'':'s'}<br>` : ''}
-     ${priceOnlyCount ? `• Log price history <strong>only</strong> (no stock change) for <strong>${priceOnlyCount}</strong> line${priceOnlyCount===1?'':'s'}<br>` : ''}
-     ${missingItemCount ? `<br><span class="faint" style="color:var(--rust);">${missingItemCount} line${missingItemCount===1?'':'s'} reference an item that doesn't exist here and will be skipped — likely a mismatch between which inventory file was used for matching.</span>` : ''}
-     <br><span class="faint">Everything else in your inventory stays untouched.</span>`,
-    'Import changes',
-    async ()=>{
-      closeModal();
-      let created = 0, updated = 0, batchesAdded = 0, skipped = 0;
-      data.changes.forEach(c=>{
-        const purchaseDate = c.purchase?.date || todayISO();
-        const purchaseRecord = {
-          id: uid(),
-          store: c.purchase?.store || '',
-          price: c.purchase?.price ?? 0,
-          qty: c.purchase?.qty ?? 1,
-          date: purchaseDate,
-          promo: c.purchase?.promo || ''
-        };
-        if(c.purchase?.pricing && c.purchase.pricing.basis === 'weight'){
-          purchaseRecord.pricingBasis = 'weight';
-          purchaseRecord.packageWeight = c.purchase.pricing.packageWeight;
-          purchaseRecord.packageWeightUnit = c.purchase.pricing.packageWeightUnit;
-          purchaseRecord.pricePerBaseUnit = c.purchase.pricing.pricePerBaseUnit;
-        }
-
-        if(c.action === 'add-batch'){
-          const item = state.items.find(i=>i.id===c.itemId);
-          if(!item){ skipped++; return; }
-          item.purchases = item.purchases || [];
-          item.purchases.push(purchaseRecord);
-          if(purchaseRecord.pricingBasis === 'weight'){
-            item.priceTrackingBasis = 'weight';
-            item.packageWeight = purchaseRecord.packageWeight;
-            item.packageWeightUnit = purchaseRecord.packageWeightUnit;
-          }
-          if(c.batch){
-            const expirationDate = c.batch.expirationDate || estimateExpiry(item.isFood, item.subcategory, purchaseDate);
-            item.batches = item.batches || [];
-            item.batches.push({ id: uid(), quantity: c.batch.quantity, expirationDate });
-            batchesAdded++;
-          }
-          updated++;
-        } else if(c.action === 'create-item'){
-          const newItem = {
-            id: c.tempId || uid(),
-            name: c.item?.name || 'Unnamed item',
-            brand: c.item?.brand || '',
-            isFood: !!c.item?.isFood,
-            subcategory: c.item?.subcategory || '',
-            locationId: c.item?.locationId || '',
-            unit: c.item?.unit || 'pcs',
-            photo: null,
-            batches: [],
-            purchases: [purchaseRecord]
-          };
-          if(purchaseRecord.pricingBasis === 'weight'){
-            newItem.priceTrackingBasis = 'weight';
-            newItem.packageWeight = purchaseRecord.packageWeight;
-            newItem.packageWeightUnit = purchaseRecord.packageWeightUnit;
-          }
-          if(c.batch){
-            const expirationDate = c.batch.expirationDate || estimateExpiry(newItem.isFood, newItem.subcategory, purchaseDate);
-            newItem.batches.push({ id: uid(), quantity: c.batch.quantity, expirationDate });
-            batchesAdded++;
-          }
-          state.items.push(newItem);
-          created++;
-        }
-      });
-
-      const ok = await saveItems();
-      renderMain();
-      const summary = `Created ${created} item${created===1?'':'s'}, updated ${updated} existing item${updated===1?'':'s'} (${batchesAdded} new batch${batchesAdded===1?'':'es'} added)${skipped?`, skipped ${skipped} line${skipped===1?'':'s'} with no matching item`:''}.`;
-      if(ok){
-        showAlertModal('Import complete', summary + ' Saved successfully.');
-      } else {
-        showAlertModal('Imported, but not saved', summary + ' However, saving failed right now — it looks correct on screen but may not be persisted yet. Try again shortly.');
-      }
-    }
-  );
+  const ok = await saveItems();
+  state.pendingImport = null;
+  state.view = 'backup';
+  setActiveNav();
+  renderMain();
+  const summary = `Created ${created} item${created===1?'':'s'}, updated ${updated} existing item${updated===1?'':'s'} (${batchesAdded} new batch${batchesAdded===1?'':'es'} added)${skippedCount?`, skipped ${skippedCount} line${skippedCount===1?'':'s'}`:''}.`;
+  if(ok){
+    showAlertModal('Import complete', summary + ' Saved successfully.');
+  } else {
+    showAlertModal('Imported, but not saved', summary + ' However, saving failed right now — it looks correct on screen but may not be persisted yet. Try again shortly.');
+  }
 }
 
 /* ============================= EXPIRY ESTIMATES ============================= */
@@ -927,6 +1039,7 @@ function renderMain(){
   else if(state.view==='lowstock') main.innerHTML = lowStockViewHTML();
   else if(state.view==='outofstock') main.innerHTML = outOfStockViewHTML();
   else if(state.view==='backup') main.innerHTML = backupViewHTML();
+  else if(state.view==='importReview') main.innerHTML = importReviewViewHTML();
   attachMainEvents();
 }
 
@@ -1316,6 +1429,9 @@ function attachMainEvents(){
     if(importInput) importInput.addEventListener('change', handleImportBackup);
     const importReceiptInput = document.getElementById('import-receipt-input');
     if(importReceiptInput) importReceiptInput.addEventListener('change', handleImportReceiptChanges);
+  }
+  if(state.view==='importReview'){
+    wireImportReview();
   }
   if(state.view==='expired' || state.view==='lowstock' || state.view==='outofstock'){
     document.querySelectorAll('[data-action="open-item"]').forEach(el=> el.addEventListener('click', ()=> openItemDetail(el.dataset.id)));
