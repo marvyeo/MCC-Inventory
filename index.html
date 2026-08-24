@@ -1062,8 +1062,8 @@ function stockPercent(item){
 function isOutOfStock(item){ return itemTotalQty(item) <= 0; }
 function isRunningLow(item){
   if(isOutOfStock(item)) return false;
-  const pct = stockPercent(item);
-  return pct !== null && pct <= 0.10;
+  if(item.parLevel == null || item.parLevel <= 0) return false;
+  return itemTotalQty(item) <= item.parLevel;
 }
 function isItemExpired(item){
   return (item.batches||[]).some(b=>{ const d=daysUntil(b.expirationDate); return d!==null && d<0; });
@@ -1279,8 +1279,8 @@ function lowStockViewHTML(){
   const list = state.items.filter(isRunningLow).sort((a,b)=> stockPercent(a) - stockPercent(b));
   return `
     <div class="topbar"><h1 class="page-title">Running Low</h1></div>
-    <p class="faint" style="margin:-8px 0 14px;">Items at or below 10% of their restock target. Set a restock target on an item's detail page (under Unit) to have it tracked here.</p>
-    ${ list.length ? itemsTableHTML(list) : `<div class="empty"><h3>Nothing running low</h3><p>Items at or below 10% of their restock target will show up here.</p></div>` }
+    <p class="faint" style="margin:-8px 0 14px;">Items whose stock is at or below their restock target. Set a restock target on an item's detail page to have it tracked here.</p>
+    ${ list.length ? itemsTableHTML(list) : `<div class="empty"><h3>Nothing running low</h3><p>Items whose stock hits or drops below their restock target will show up here.</p></div>` }
   `;
 }
 function outOfStockViewHTML(){
@@ -1659,7 +1659,7 @@ function renderAddItemModal(isFood, prefill){
       <div class="field">
         <label>Restock target (optional)</label>
         <input id="it-par" type="number" min="0" step="0.1" placeholder="Defaults to quantity above" value="${prefill.parLevel!=null?prefill.parLevel:''}">
-        <p class="hint" style="margin:2px 0 0;">Used to flag "Running Low" — when stock drops to 10% of this, it'll show up on that page.</p>
+        <p class="hint" style="margin:2px 0 0;">Used to flag "Running Low" — when stock hits or drops below this number, the item shows up on that page.</p>
       </div>
       <div class="field">
         <label>Expiration date <span class="faint" id="est-note"></span></label>
@@ -1814,7 +1814,7 @@ function openItemDetail(id, isFoodOverride){
         <div class="field">
           <label>Restock target (optional)</label>
           <input id="d-par" type="number" min="0" step="0.1" value="${item.parLevel!=null?item.parLevel:''}" placeholder="e.g. 10">
-          <p class="hint" style="margin:2px 0 0;">Used to flag "Running Low" — when stock drops to 10% of this. Leave blank to exclude this item from that page.</p>
+          <p class="hint" style="margin:2px 0 0;">Used to flag "Running Low" — when stock hits or drops below this number. Leave blank to exclude this item from that page.</p>
         </div>
         <div class="modal-actions" style="border-top:none;padding-top:0;justify-content:flex-start;">
           <button class="btn btn-sm" id="save-item-fields">Save changes</button>
