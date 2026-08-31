@@ -314,6 +314,8 @@ const DRIVE_FILE_ITEMS = 'mcc-inventory-items.json';
 // Fill these in after step (c) above. Leave blank for first-run/primary-user setup.
 const DRIVE_FILE_ID_LOCATIONS = '';
 const DRIVE_FILE_ID_ITEMS = '';
+// Your GitHub Pages URL for this app (used in upcoming[] entries).
+const APP_URL = 'https://marvyeo.github.io/MCC-Inventory/';
 
 let driveAccessToken = null;
 let driveTokenExpiresAt = 0;
@@ -504,7 +506,11 @@ async function loadData(){
   }catch(e){ console.error('load locations failed', e); state.locations = []; locFailed = true; }
   try{
     const itemsRaw = await driveReadFile(DRIVE_FILE_ITEMS, DRIVE_FILE_ID_ITEMS || null);
-    state.items = itemsRaw ? JSON.parse(itemsRaw) : [];
+    if(itemsRaw){
+      const parsed = JSON.parse(itemsRaw);
+      // Support both the new { items, upcoming } wrapper and the legacy raw array.
+      state.items = Array.isArray(parsed) ? parsed : (parsed.items || []);
+    } else { state.items = []; }
   }catch(e){ console.error('load items failed', e); state.items = []; itemsFailed = true; }
   updateConnStatus(!(locFailed || itemsFailed));
   if(itemsFailed || locFailed){
@@ -546,7 +552,7 @@ async function saveLocations(){
   }
 }
 async function saveItems(){
-  const payload = JSON.stringify(state.items);
+  const payload = JSON.stringify({ items: state.items, upcoming: computeUpcoming() });
   try{
     await driveWriteWithRetry(DRIVE_FILE_ITEMS, payload, DRIVE_FILE_ID_ITEMS || null);
     updateConnStatus(true);
@@ -562,6 +568,27 @@ function warnIfSaveFailed(ok, what){
   if(!ok) showToast(`Heads up: ${what} could not be saved right now (Drive connection issue). It'll look fine until you refresh, but isn't actually saved — try again shortly.`, {warn:true, duration:8000});
 }
 
+/* ============================= UPCOMING[] ============================= */
+function computeUpcoming(){
+  const today = todayISO();
+  return state.items
+    .filter(item => {
+      if(item.parLevel == null) return false;
+      const stock = (item.batches || []).reduce((sum, b) => sum + (b.quantity || 0), 0);
+      return stock <= item.parLevel;
+    })
+    .map(item => {
+      const stock = (item.batches || []).reduce((sum, b) => sum + (b.quantity || 0), 0);
+      return {
+        label: `${item.name} — Running Low (${stock} remaining, par: ${item.parLevel})`,
+        date: today,
+        type: 'low-stock',
+        app: 'mccinventory',
+        priority: 'high',
+        url: APP_URL
+      };
+    });
+}
 /* ============================= BACKUP / RESTORE ============================= */
 function exportBackup(includePhotos){
   const items = includePhotos ? state.items : state.items.map(i=>{
