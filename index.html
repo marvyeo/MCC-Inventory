@@ -320,8 +320,7 @@ const DRIVE_FILE_PHOTOS = 'mcc-inventory-photos.json';
 // (no extra "find by name" round trip first).
 const DRIVE_FILE_ID_LOCATIONS = '1idvjvAyK7ow7hxZ9oZdB3F77y7qCGijF';
 const DRIVE_FILE_ID_ITEMS = '1qTGUshdGVFfJ3cpcYYLthDSaUyPiyBZ-';
-// Leave blank until the app shows you the new photos file's ID once, then paste it here.
-const DRIVE_FILE_ID_PHOTOS = '';
+const DRIVE_FILE_ID_PHOTOS = '1uVwI26oh-kf7i05aawdcmqdxnwq1Di-z';
 // Your GitHub Pages URL for this app (used in upcoming[] entries).
 const APP_URL = 'https://marvyeo.github.io/MCC-Inventory/';
 
@@ -517,7 +516,8 @@ function maybeShowFirstRunSetup(){
   if(!names.length) return;
   const rows = names.map(n=> `<div class="mono" style="background:var(--surface-alt);padding:8px 10px;border-radius:6px;margin-bottom:6px;font-size:12px;word-break:break-all;"><strong>${escapeHTML(n)}</strong><br>${escapeHTML(newlyCreatedFileIds[n])}</div>`).join('');
   showAlertModal('First-time setup — one more step',
-    `New data files were just created in your Drive. To let other people share this same data, copy each file ID into its matching DRIVE_FILE_ID_* constant near the top of index.html (e.g. mcc-inventory-photos.json → DRIVE_FILE_ID_PHOTOS), redeploy, then in Google Drive share the file(s) (Editor access) with anyone else who needs access:<br><br>${rows}`
+    `New data files were just created in your Drive. To let other people share this same data, copy each file ID into its matching DRIVE_FILE_ID_* constant near the top of index.html (e.g. mcc-inventory-photos.json → DRIVE_FILE_ID_PHOTOS), redeploy, then in Google Drive share the file(s) (Editor access) with anyone else who needs access:<br><br>${rows}`,
+    { html: true }
   );
   newlyCreatedFileIds = {};
 }
@@ -1618,14 +1618,15 @@ function showToast(message, opts){
     setTimeout(()=> el.remove(), 300);
   }, duration);
 }
-function showAlertModal(title, message){
+// opts.html: message is trusted markup built by the app (escape any data inside it first).
+function showAlertModal(title, message, opts){
   openModal(`
     <div class="modal">
       <div class="modal-head">
         <h3 class="modal-title">${escapeHTML(title)}</h3>
         <button class="modal-close" data-action="close">&times;</button>
       </div>
-      <p style="font-size:13.5px;line-height:1.5;">${escapeHTML(message)}</p>
+      <div style="font-size:13.5px;line-height:1.5;">${opts && opts.html ? message : escapeHTML(message)}</div>
       <div class="modal-actions">
         <button class="btn btn-primary" data-action="close">OK</button>
       </div>
