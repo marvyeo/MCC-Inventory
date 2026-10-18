@@ -83,6 +83,7 @@
   .foot-item.conn-item:hover{background:none;color:var(--ink-faint);}
   .conn-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);flex-shrink:0;margin-left:2px;}
   .conn-dot.offline{background:var(--rust);}
+  .conn-dot.saving{background:var(--amber);}
 
   /* ---- Main ---- */
   #main{flex:1 1 0%;min-width:0;padding:28px 36px 60px;max-width:1180px;overflow-x:hidden;}
@@ -311,9 +312,16 @@ const GOOGLE_CLIENT_ID = '676510183503-02v1ruuds1e7b1b7bqu1rt602bl6ub06.apps.goo
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const DRIVE_FILE_LOCATIONS = 'mcc-inventory-locations.json';
 const DRIVE_FILE_ITEMS = 'mcc-inventory-items.json';
-// Fill these in after step (c) above. Leave blank for first-run/primary-user setup.
-const DRIVE_FILE_ID_LOCATIONS = '';
-const DRIVE_FILE_ID_ITEMS = '';
+// Photos live in their own file so the items file stays small (fast saves, fast
+// refreshes, and a lean file for Receipt Reader). Created automatically on the
+// first save after this version is deployed.
+const DRIVE_FILE_PHOTOS = 'mcc-inventory-photos.json';
+// Fixed file IDs. With these set, every read/write goes straight to the file
+// (no extra "find by name" round trip first).
+const DRIVE_FILE_ID_LOCATIONS = '1idvjvAyK7ow7hxZ9oZdB3F77y7qCGijF';
+const DRIVE_FILE_ID_ITEMS = '1qTGUshdGVFfJ3cpcYYLthDSaUyPiyBZ-';
+// Leave blank until the app shows you the new photos file's ID once, then paste it here.
+const DRIVE_FILE_ID_PHOTOS = '';
 // Your GitHub Pages URL for this app (used in upcoming[] entries).
 const APP_URL = 'https://marvyeo.github.io/MCC-Inventory/';
 
@@ -339,12 +347,14 @@ function clearStoredToken(){
   try{ localStorage.removeItem('mcc_drive_token'); }catch(e){}
 }
 
-function updateConnStatus(ok){
+function updateConnStatus(ok){ setSyncStatus(ok ? 'ok' : 'error'); }
+function setSyncStatus(kind){
   const dot = document.getElementById('conn-dot');
   const label = document.getElementById('conn-label');
   if(!dot || !label) return;
-  dot.classList.toggle('offline', !ok);
-  label.textContent = ok ? 'Connected to Drive' : 'Drive connection issue';
+  dot.classList.toggle('offline', kind === 'error');
+  dot.classList.toggle('saving', kind === 'saving');
+  label.textContent = kind === 'saving' ? 'Saving to Drive…' : kind === 'error' ? 'Drive connection issue' : 'Synced with Drive';
 }
 
 function showAuthGate(errorMsg){
@@ -435,26 +445,54 @@ async function driveFindFileId(name){
   const data = await res.json();
   return (data.files && data.files.length) ? data.files[0].id : null;
 }
-async function driveReadFile(name, explicitId){
+// name -> file ID, so a name lookup happens at most once per session.
+const resolvedIds = {};
+// name -> Drive "version" last read or written by this tab. Lets refresh skip
+// re-downloading files that haven't changed (a tiny metadata call instead).
+const knownVersions = {};
+async function resolveFileId(name, explicitId){
+  if(explicitId) return explicitId;
+  if(resolvedIds[name]) return resolvedIds[name];
+  const id = await driveFindFileId(name);
+  if(id) resolvedIds[name] = id;
+  return id;
+}
+async function driveGetVersion(name, explicitId){
   await ensureFreshToken();
-  const id = explicitId || await driveFindFileId(name);
+  const id = await resolveFileId(name, explicitId);
   if(!id) return null;
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=version`, {
     headers: { Authorization: `Bearer ${driveAccessToken}` }
   });
+  if(!res.ok) throw new Error('Drive metadata failed: ' + res.status);
+  return (await res.json()).version || null;
+}
+async function driveReadFile(name, explicitId){
+  await ensureFreshToken();
+  const id = await resolveFileId(name, explicitId);
+  if(!id) return null;
+  const [res, version] = await Promise.all([
+    fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, {
+      headers: { Authorization: `Bearer ${driveAccessToken}` }
+    }),
+    driveGetVersion(name, id).catch(()=>null)
+  ]);
   if(!res.ok) throw new Error('Drive read failed: ' + res.status);
-  return await res.text();
+  const text = await res.text();
+  knownVersions[name] = version;
+  return text;
 }
 async function driveWriteFile(name, content, explicitId){
   await ensureFreshToken();
-  const id = explicitId || await driveFindFileId(name);
+  const id = await resolveFileId(name, explicitId);
   if(id){
-    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, {
+    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media&fields=version`, {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${driveAccessToken}`, 'Content-Type': 'application/json' },
       body: content
     });
     if(!res.ok) throw new Error('Drive update failed: ' + res.status);
+    try{ knownVersions[name] = (await res.json()).version || null; }catch(e){ knownVersions[name] = null; }
   } else {
     const boundary = 'mcc_boundary_7f3a9c';
     const metadata = { name, mimeType: 'application/json' };
@@ -462,7 +500,7 @@ async function driveWriteFile(name, content, explicitId){
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
       `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n` +
       `--${boundary}--`;
-    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,version', {
       method: 'POST',
       headers: { Authorization: `Bearer ${driveAccessToken}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
       body
@@ -470,6 +508,8 @@ async function driveWriteFile(name, content, explicitId){
     if(!res.ok) throw new Error('Drive create failed: ' + res.status);
     const created = await res.json();
     newlyCreatedFileIds[name] = created.id;
+    resolvedIds[name] = created.id;
+    knownVersions[name] = created.version || null;
   }
 }
 function maybeShowFirstRunSetup(){
@@ -477,7 +517,7 @@ function maybeShowFirstRunSetup(){
   if(!names.length) return;
   const rows = names.map(n=> `<div class="mono" style="background:var(--surface-alt);padding:8px 10px;border-radius:6px;margin-bottom:6px;font-size:12px;word-break:break-all;"><strong>${escapeHTML(n)}</strong><br>${escapeHTML(newlyCreatedFileIds[n])}</div>`).join('');
   showAlertModal('First-time setup — one more step',
-    `New data files were just created in your Drive. To let other people share this same data, copy these file IDs into DRIVE_FILE_ID_LOCATIONS / DRIVE_FILE_ID_ITEMS near the top of index.html, redeploy, then in Google Drive share these two files (Editor access) with anyone else who needs access:<br><br>${rows}`
+    `New data files were just created in your Drive. To let other people share this same data, copy each file ID into its matching DRIVE_FILE_ID_* constant near the top of index.html (e.g. mcc-inventory-photos.json → DRIVE_FILE_ID_PHOTOS), redeploy, then in Google Drive share the file(s) (Editor access) with anyone else who needs access:<br><br>${rows}`
   );
   newlyCreatedFileIds = {};
 }
@@ -511,6 +551,13 @@ async function loadData(){
       // Support both the new { items, upcoming } wrapper and the legacy raw array.
       state.items = Array.isArray(parsed) ? parsed : (parsed.items || []);
     } else { state.items = []; }
+    // Photos now live in their own file. Items saved by older versions still carry
+    // them inline — keep those (they get moved over on the next save); everything
+    // else picks its photo up from the cache.
+    state.items.forEach(it=>{
+      if(it.photo) photoCache[it.id] = it.photo;
+      else it.photo = photoCache[it.id] || null;
+    });
   }catch(e){ console.error('load items failed', e); state.items = []; itemsFailed = true; }
   updateConnStatus(!(locFailed || itemsFailed));
   if(itemsFailed || locFailed){
@@ -526,6 +573,67 @@ async function loadData(){
   });
   state.loaded = true;
 }
+/* ---- Photos (separate Drive file: { itemId: dataURL }) ---- */
+let photoCache = {};
+let lastSavedPhotosFp = null;   // fingerprint of what's in the photos file on Drive
+let photosLoaded = false;
+let photosLoadFailed = false;
+let photosReady = Promise.resolve();
+function photosFingerprint(map){
+  return Object.keys(map).sort().map(id=> id + ':' + map[id].length + ':' + map[id].slice(-32)).join('|');
+}
+// preferLocal: on first load, a photo set before the file arrived wins.
+async function loadPhotos(preferLocal){
+  try{
+    const raw = await driveReadFile(DRIVE_FILE_PHOTOS, DRIVE_FILE_ID_PHOTOS || null);
+    const map = raw ? JSON.parse(raw) : {};
+    lastSavedPhotosFp = photosFingerprint(map);
+    photoCache = Object.assign({}, map);
+    state.items.forEach(it=>{
+      it.photo = preferLocal ? (it.photo || map[it.id] || null) : (map[it.id] || it.photo || null);
+    });
+    photosLoaded = true;
+    photosLoadFailed = false;
+  }catch(e){
+    console.error('load photos failed', e);
+    photosLoadFailed = true;
+  }
+}
+function rerenderIfIdle(){
+  if(modalRoot.classList.contains('open')) return;
+  const ae = document.activeElement;
+  if(ae && ae.closest && ae.closest('#main') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
+  renderMain();
+}
+
+/* ---- Background save queue ----
+   Edits update the screen immediately; the Drive write happens behind the scenes.
+   Rapid edits collapse into one extra write (each write sends the latest state).
+   Awaiting the returned promise gives true/false once everything queued is saved. */
+let saveLoop = null;
+let saveQueued = false;
+function persistItems(what){
+  saveQueued = true;
+  setSyncStatus('saving');
+  if(!saveLoop){
+    saveLoop = (async ()=>{
+      let ok = true;
+      while(saveQueued){
+        saveQueued = false;
+        ok = await saveItems();
+      }
+      saveLoop = null;
+      setSyncStatus(ok ? 'ok' : 'error');
+      if(!ok) warnIfSaveFailed(false, what || 'your latest changes');
+      return ok;
+    })();
+  }
+  return saveLoop;
+}
+window.addEventListener('beforeunload', (e)=>{
+  if(saveLoop || saveQueued){ e.preventDefault(); e.returnValue = ''; }
+});
+
 async function driveWriteWithRetry(name, content, explicitId, attempts=3, delayMs=900){
   let lastErr;
   for(let i=0;i<attempts;i++){
@@ -551,16 +659,34 @@ async function saveLocations(){
     return false;
   }
 }
+// Use persistItems() rather than calling this directly — it queues and coalesces writes.
 async function saveItems(){
-  const payload = JSON.stringify({ items: state.items, upcoming: computeUpcoming() });
+  await photosReady; // never build a photos file from a half-loaded set
+  const photoMap = {};
+  state.items.forEach(i=>{ if(i.photo) photoMap[i.id] = i.photo; });
+  // Photos are only re-uploaded when they actually changed.
+  let photosSplit = !photosLoadFailed;
+  if(photosSplit){
+    const fp = photosFingerprint(photoMap);
+    if(fp !== lastSavedPhotosFp){
+      try{
+        await driveWriteWithRetry(DRIVE_FILE_PHOTOS, JSON.stringify(photoMap), DRIVE_FILE_ID_PHOTOS || null);
+        lastSavedPhotosFp = fp;
+        photoCache = Object.assign({}, photoMap);
+      }catch(e){
+        console.error('save photos failed', e);
+        photosSplit = false; // fall back to keeping photos inline so nothing is lost
+      }
+    }
+  }
+  const items = photosSplit ? state.items.map(i=>{ const { photo, ...rest } = i; return rest; }) : state.items;
+  const payload = JSON.stringify({ items, upcoming: computeUpcoming() });
   try{
     await driveWriteWithRetry(DRIVE_FILE_ITEMS, payload, DRIVE_FILE_ID_ITEMS || null);
-    updateConnStatus(true);
     maybeShowFirstRunSetup();
     return true;
   }catch(e){
     console.error('save items failed', e);
-    updateConnStatus(false);
     return false;
   }
 }
@@ -591,6 +717,10 @@ function computeUpcoming(){
 }
 /* ============================= BACKUP / RESTORE ============================= */
 function exportBackup(includePhotos){
+  if(includePhotos && !photosLoaded){
+    showToast(photosLoadFailed ? "Photos couldn't be loaded from Drive, so a full backup isn't possible right now. Try Refresh, or take a no-photos backup." : 'Photos are still loading — try again in a few seconds.', {warn:true});
+    return;
+  }
   const items = includePhotos ? state.items : state.items.map(i=>{
     const { photo, ...rest } = i;
     return rest;
@@ -643,7 +773,7 @@ async function handleImportBackup(e){
       state.locations = data.locations;
       state.items = data.items;
       const locOk = await saveLocations();
-      const itemsOk = await saveItems();
+      const itemsOk = await persistItems();
       renderMain();
       if(locOk && itemsOk){
         showAlertModal('Restore complete', 'Your backup was restored and saved successfully.');
@@ -875,7 +1005,7 @@ async function applyReviewedImport(){
     }
   });
 
-  const ok = await saveItems();
+  const ok = await persistItems();
   state.pendingImport = null;
   state.view = 'backup';
   setActiveNav();
@@ -1787,10 +1917,9 @@ function wireAddItemModal(isFood, prefill){
       item.purchases.push({ id: uid(), store: puStore, price: puPrice, qty: puQty, date: puDate, promo: puPromo });
     }
     state.items.push(item);
-    const ok = await saveItems();
     closeModal();
     renderMain();
-    if(!ok) showToast(`Heads up: "${name}" could not be saved right now (storage is being unreliable). It will show up until you refresh, but is NOT actually saved yet — try re-adding it shortly.${item.photo ? ' Photos in particular seem to be triggering this today.' : ''}`, {warn:true, duration:9000});
+    persistItems(`"${name}"`);
   });
 }
 
@@ -1987,9 +2116,8 @@ function openItemDetail(id, isFoodOverride){
     if(!file) return;
     try{
       item.photo = await compressImage(file);
-      const ok = await saveItems();
       openItemDetail(item.id);
-      if(!ok) showToast('Heads up: this photo could not be saved right now (storage is being unreliable). It will show up until you refresh, but is NOT actually saved — try again shortly.', {warn:true, duration:8000});
+      persistItems('this photo');
     }catch(err){ showToast('Could not read that photo. Try another file.', {warn:true}); }
   }
   document.getElementById('d-photo-camera').addEventListener('change', handleDetailPhotoInput);
@@ -2015,8 +2143,8 @@ function openItemDetail(id, isFoodOverride){
       item.packageWeight = null;
       item.packageWeightUnit = null;
     }
-    warnIfSaveFailed(await saveItems(), 'these changes');
     closeModal(); renderMain();
+    persistItems('these changes');
   });
   document.getElementById('duplicate-item').addEventListener('click', ()=>{
     closeModal();
@@ -2024,28 +2152,28 @@ function openItemDetail(id, isFoodOverride){
   });
   document.getElementById('delete-item').addEventListener('click', async ()=>{
     state.items = state.items.filter(i=>i.id!==item.id);
-    warnIfSaveFailed(await saveItems(), 'this deletion');
     closeModal(); renderMain();
+    persistItems('this deletion');
   });
 
   // Batch editing
   modalRoot.querySelectorAll('.batch-qty').forEach(inp=>{
     inp.addEventListener('change', async ()=>{
       const b = item.batches.find(x=>x.id===inp.dataset.batchId);
-      if(b){ b.quantity = parseFloat(inp.value) || 0; warnIfSaveFailed(await saveItems(), 'this batch quantity'); openItemDetail(item.id); }
+      if(b){ b.quantity = parseFloat(inp.value) || 0; openItemDetail(item.id); persistItems('this batch quantity'); }
     });
   });
   modalRoot.querySelectorAll('.batch-expiry').forEach(inp=>{
     inp.addEventListener('change', async ()=>{
       const b = item.batches.find(x=>x.id===inp.dataset.batchId);
-      if(b){ b.expirationDate = inp.value || null; warnIfSaveFailed(await saveItems(), 'this expiration date'); openItemDetail(item.id); }
+      if(b){ b.expirationDate = inp.value || null; openItemDetail(item.id); persistItems('this expiration date'); }
     });
   });
   modalRoot.querySelectorAll('[data-del-batch]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       item.batches = item.batches.filter(b=>b.id !== btn.dataset.delBatch);
-      warnIfSaveFailed(await saveItems(), 'this batch removal');
       openItemDetail(item.id);
+      persistItems('this batch removal');
     });
   });
   document.getElementById('show-add-batch').addEventListener('click', ()=>{
@@ -2060,8 +2188,8 @@ function openItemDetail(id, isFoodOverride){
     const expirationDate = document.getElementById('nb-expiry').value || null;
     item.batches = item.batches || [];
     item.batches.push({ id: uid(), quantity: qty, expirationDate });
-    warnIfSaveFailed(await saveItems(), 'this new batch');
     openItemDetail(item.id);
+    persistItems('this new batch');
   });
 
   document.getElementById('add-purchase').addEventListener('click', async ()=>{
@@ -2073,14 +2201,14 @@ function openItemDetail(id, isFoodOverride){
     if(!store || isNaN(price)) { showToast('Enter at least a store and a price paid.', {warn:true}); return; }
     item.purchases = item.purchases || [];
     item.purchases.push({ id: uid(), store, price, qty, date, promo });
-    warnIfSaveFailed(await saveItems(), 'this purchase record');
     openItemDetail(item.id);
+    persistItems('this purchase record');
   });
   modalRoot.querySelectorAll('[data-del-purchase]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       item.purchases = item.purchases.filter(p=>p.id !== btn.dataset.delPurchase);
-      warnIfSaveFailed(await saveItems(), 'this purchase removal');
       openItemDetail(item.id);
+      persistItems('this purchase removal');
     });
   });
 }
@@ -2098,8 +2226,10 @@ async function startApp(){
   setActiveNav();
   renderMain();
   wireRefreshControls();
+  photosReady = loadPhotos(true).then(rerenderIfIdle);
 }
 let refreshInFlight = false;
+let lastRefreshCheck = 0;
 async function refreshFromDrive(silent){
   if(refreshInFlight) return;
   // Don't clobber an in-progress edit — skip auto-refreshes while a modal is open.
@@ -2108,11 +2238,31 @@ async function refreshFromDrive(silent){
     if(!silent) showToast("Close the open form first, then refresh — didn't want to overwrite what you're editing.", {warn:true});
     return;
   }
+  // Never pull while our own edits are still on their way up — that would
+  // overwrite them on screen with the older copy from Drive.
+  if(saveLoop || saveQueued){
+    if(!silent) showToast('Still saving your last change — try again in a moment.', {duration:2500});
+    return;
+  }
+  // Focus and visibility events often fire together; don't double-check.
+  if(silent && Date.now() - lastRefreshCheck < 10000) return;
+  lastRefreshCheck = Date.now();
   refreshInFlight = true;
   try{
-    await loadData();
-    renderMain();
-    if(!silent) showToast('Refreshed from Drive.', {duration:2000});
+    // A tiny metadata call per file instead of re-downloading everything.
+    const [iv, lv, pv] = await Promise.all([
+      driveGetVersion(DRIVE_FILE_ITEMS, DRIVE_FILE_ID_ITEMS || null).catch(()=>undefined),
+      driveGetVersion(DRIVE_FILE_LOCATIONS, DRIVE_FILE_ID_LOCATIONS || null).catch(()=>undefined),
+      driveGetVersion(DRIVE_FILE_PHOTOS, DRIVE_FILE_ID_PHOTOS || null).catch(()=>undefined)
+    ]);
+    const changed = (v, name)=> v === undefined || v === null || v !== knownVersions[name];
+    const dataChanged = changed(iv, DRIVE_FILE_ITEMS) || changed(lv, DRIVE_FILE_LOCATIONS);
+    const photosChanged = pv !== null && (photosLoadFailed || changed(pv, DRIVE_FILE_PHOTOS));
+    if(saveLoop || saveQueued) return; // an edit started while we were checking
+    if(dataChanged) await loadData();
+    if(photosChanged){ photosReady = loadPhotos(false); await photosReady; }
+    if(dataChanged || photosChanged) rerenderIfIdle();
+    if(!silent) showToast(dataChanged || photosChanged ? 'Refreshed from Drive.' : 'Already up to date.', {duration:2000});
   } finally {
     refreshInFlight = false;
   }
