@@ -3,6 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#10151B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Inventory">
 <title>MCC Inventory</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2287,6 +2294,10 @@ function waitForGoogleLib(cb){
   setTimeout(()=> waitForGoogleLib(cb), 100);
 }
 waitForGoogleLib(initGoogleAuth);
+</script>
+<script>
+// Installable app: register the service worker (only on https, i.e. GitHub Pages)
+if ('serviceWorker' in navigator && location.protocol === 'https:') window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 </script>
 </body>
 </html>
