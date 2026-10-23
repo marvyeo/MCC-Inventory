@@ -32,10 +32,18 @@ Receipt Reader's source is the published artifact (link below); read it from the
 
 ---
 
-## Latest changes (Oct 21–22, 2026, conductor chat)
+## Latest changes (Oct 23, 2026, conductor chat "Life Plan Roadmap ver 7", Sprints 13.4, 13.3, 13.2)
+- **Moved to the shared OAuth client** (`669494100250-…`, scope `drive.file`; was `676510183503-…` with full `drive`). `drive.file` only sees files this client created or that the person picked, so on first open the app shows **"Pick the 3 files"** (Google Picker, multi-select; also searches "Shared with me"). It checks access to the three fixed IDs *before* loading and never loads as empty, so a missing grant cannot cause an empty save over real data. **Marvin and Caroline each do this once, signed in as themselves.** After it, Life Plan can find the items file by name (no separate Pick missing files for MCC).
+- **Shared sign-in (`lp-sso`):** uses a valid `drive.file` token from Life Plan or another app; publishes its own after sign-in. The old per-app token key `mcc_drive_token` is discarded (`mcc_drive_token_v2` now).
+- **Disconnect no longer revokes the Google token** (revoking would cancel the file grants for every app on the shared client). It clears local tokens and `lp-sso`.
+- **13.3 (iOS):** "Sign-in window not opening? Try another way" (redirect sign-in, state `mcc`) and an iPhone "Share → Add to Home Screen" hint on the sign-in card. iOS cannot install web apps from an install prompt; it only uses Safari's Add to Home Screen. Needs `https://marvyeo.github.io/MCC-Inventory/` under Authorized redirect URIs on the shared client.
+- **13.2:** "← Life Plan" item at the top of the sidebar, `viewport-fit=cover`, safe-area padding on sidebar and main, shared theme tokens `--lp-bg/--lp-surface/--lp-text/--lp-muted/--lp-accent`. `sw.js` cache `mccinventory-v3`.
+- Not tested live. Old OAuth client `676510183503-…` is now unused.
+
+## Earlier changes (Oct 21–22, 2026, conductor chat)
 - **Installable (21 Oct):** `manifest.json`, network-first `sw.js` (cache `mccinventory-v2`), ecosystem icons. No iPhone redirect sign-in fallback yet (MCC's OAuth client is in its own Google Cloud project, so the redirect URI goes there).
 - **Manifest id fixed (22 Oct):** `"id": "/MCC-Inventory/"`.
-- **Life Plan** dashboard reads `upcoming[]` (`low-stock`) from the items file; needs the one-time **Pick missing files** grant because MCC uses its own OAuth client.
+- **Life Plan** dashboard reads `upcoming[]` (`low-stock`) from the items file. (Superseded 2026-10-23: MCC is on the shared client, so the picker step happens inside MCC.)
 - Verified 22 Oct: `DRIVE_FILE_ID_ITEMS`, `_LOCATIONS` and `_PHOTOS` are all filled in the deployed `index.html` (closes to-do 6).
 
 ## 1. System overview
@@ -61,9 +69,9 @@ There are two apps.
 ### Hosting & config
 - **Live URL:** https://marvyeo.github.io/MCC-Inventory/
 - **Repo:** https://github.com/marvyeo/MCC-Inventory (`index.html`, `manifest.json`, `sw.js`, `icons/`; Pages redeploys in about a minute)
-- **OAuth Client ID:** `676510183503-02v1ruuds1e7b1b7bqu1rt602bl6ub06.apps.googleusercontent.com`. It is public-safe.
+- **OAuth Client ID:** `669494100250-gvromuq72r7j0djmkd4vdbdq5damncj7.apps.googleusercontent.com` (shared Life Plan client since 2026-10-23; was `676510183503-…`). It is public-safe.
 - **Authorized JS origin:** `https://marvyeo.github.io`. It has to match exactly. Sign-in fails silently anywhere else, including the artifact preview.
-- **Scope:** `https://www.googleapis.com/auth/drive`. This broad scope gives shared multi-user access to files in the primary user's Drive. Expect the "unverified app" warning; it is normal. Every user has to be a **Test user** in Google Auth Platform → Audience.
+- **Scope:** `https://www.googleapis.com/auth/drive.file` (since 2026-10-23; was full `drive`). Each user picks the three fixed-ID files once with Google Picker, which is how the second person gets access to files the primary user owns. Expect the "unverified app" warning; it is normal. Every user has to be a **Test user** in Google Auth Platform → Audience.
 - After editing on GitHub, a stale browser cache can still show the old version. A hard refresh fixes it.
 
 ### Drive files (accessed by fixed ID, never by name)
@@ -195,3 +203,4 @@ It maps normalized receipt text to an item ID. Entries are added only when a lin
 ## 7. Change log
 - **2026-10-18:** latency update (background saves, photos split out); Receipt Reader published.
 - **ver 2 (2026-10-22):** moved into the repo as `PROJECT_STATE.md`; added Session Rules; recorded installability and the manifest id fix.
+- **2026-10-23 (conductor, Sprints 13.4 + 13.3 + 13.2):** shared OAuth client + `drive.file` with a one-time file-pick gate, shared `lp-sso` sign-in, no token revoke on Disconnect, iOS redirect fallback and hint, "← Life Plan" link, safe areas, theme tokens; `sw.js` cache `mccinventory-v3`. Not tested live.

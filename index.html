@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -252,6 +252,16 @@
     table.card-table td.card-title{display:block;padding:0 0 8px;margin-bottom:6px;border-bottom:1px solid var(--border);}
     table.card-table td.card-action{justify-content:flex-end;padding-top:8px;border-top:1px solid var(--border);margin-top:2px;}
   }
+  /* Sprint 13.2: shared theme tokens (same names in every app, mapped to this app's palette), back link, safe areas */
+  :root{ --lp-bg:var(--bg); --lp-surface:var(--surface); --lp-text:var(--ink); --lp-muted:var(--ink-soft); --lp-accent:var(--teal); }
+  .lp-back{text-decoration:none;color:var(--lp-muted);margin-bottom:10px;}
+  .lp-back:hover{color:var(--lp-text);}
+  #sidebar{padding-top:calc(24px + env(safe-area-inset-top));padding-bottom:calc(24px + env(safe-area-inset-bottom));}
+  #main{padding-bottom:calc(60px + env(safe-area-inset-bottom));}
+  @media (max-width:860px){
+    #sidebar{padding-top:calc(20px + env(safe-area-inset-top));padding-bottom:calc(20px + env(safe-area-inset-bottom));}
+    #main{padding-bottom:calc(60px + env(safe-area-inset-bottom));}
+  }
 </style>
 </head>
 <body>
@@ -262,10 +272,13 @@
     <p>Connect your Google Drive to load and save your inventory. Your data is stored as a file in your own Drive — nowhere else.</p>
     <button class="auth-btn" id="google-signin-btn">Connect Google Drive</button>
     <div id="auth-error-slot"></div>
+    <a href="#" onclick="event.preventDefault();startRedirectSignIn()" style="display:block;margin-top:14px;font-size:12px;color:var(--ink-faint);text-decoration:underline;">Sign-in window not opening? Try another way</a>
+    <p id="ios-hint" style="display:none;margin-top:12px;font-size:12px;color:var(--ink-faint);">On iPhone, install it from Safari: tap <b>Share</b>, then <b>Add to Home Screen</b>.</p>
   </div>
 </div>
 <div id="app">
   <div id="sidebar">
+    <a class="nav-item lp-back" href="https://marvyeo.github.io/LifePlan/" aria-label="Back to Life Plan"><span class="nav-icon">&larr;</span><span class="nav-label">Life Plan</span></a>
     <div class="brand">
       <div class="brand-mark">M</div>
       <div class="brand-name">MCC Inventory</div>
@@ -315,8 +328,15 @@
       files directly by ID — no ambiguity, no risk of someone accidentally
       creating their own separate copy.
 ================================================================================= */
-const GOOGLE_CLIENT_ID = '676510183503-02v1ruuds1e7b1b7bqu1rt602bl6ub06.apps.googleusercontent.com';
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
+// Sprint 13.4 (2026-10-23): moved to the shared Life Plan OAuth client (was 676510183503-…, full `drive` scope).
+// The shared client only has `drive.file`, which can see files this client created or that the person picked
+// with Google Picker. The three files below are therefore picked once per Google account (see showFileGate).
+const GOOGLE_CLIENT_ID = '669494100250-gvromuq72r7j0djmkd4vdbdq5damncj7.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const PICKER_API_KEY = 'AIzaSyAHadhdBv8qOsaD91L6l4V74AF38LZVCFY';
+const GCP_APP_ID = '669494100250';
+const LP_URL = 'https://marvyeo.github.io/LifePlan/';
+const TOKEN_KEY = 'mcc_drive_token_v2'; // v1 held a token for the old client and is discarded
 const DRIVE_FILE_LOCATIONS = 'mcc-inventory-locations.json';
 const DRIVE_FILE_ITEMS = 'mcc-inventory-items.json';
 // Photos live in their own file so the items file stays small (fast saves, fast
@@ -337,12 +357,12 @@ let tokenClient = null;
 
 function saveTokenToLocalStorage(token, expiresInSec){
   try{
-    localStorage.setItem('mcc_drive_token', JSON.stringify({ token, expiresAt: Date.now() + expiresInSec*1000 - 60000 }));
+    localStorage.setItem(TOKEN_KEY, JSON.stringify({ token, expiresAt: Date.now() + expiresInSec*1000 - 60000 }));
   }catch(e){}
 }
 function loadTokenFromLocalStorage(){
   try{
-    const raw = localStorage.getItem('mcc_drive_token');
+    const raw = localStorage.getItem(TOKEN_KEY);
     if(!raw) return null;
     const parsed = JSON.parse(raw);
     if(parsed.expiresAt > Date.now()) return parsed;
@@ -350,7 +370,49 @@ function loadTokenFromLocalStorage(){
   }catch(e){ return null; }
 }
 function clearStoredToken(){
-  try{ localStorage.removeItem('mcc_drive_token'); }catch(e){}
+  try{ localStorage.removeItem(TOKEN_KEY); localStorage.removeItem('mcc_drive_token'); }catch(e){}
+}
+
+/* Shared sign-in with Life Plan and the other apps. All apps share the origin https://marvyeo.github.io, so
+   localStorage is shared. Key `lp-sso` = { t, exp, email, scope, client }. Only a drive.file token for the shared
+   client is used; a wider token is never shared. */
+const SSO_KEY = 'lp-sso';
+function ssoPublish(t, expiresIn){
+  try{
+    let email = ''; try{ email = (JSON.parse(localStorage.getItem(SSO_KEY) || 'null') || {}).email || ''; }catch(e){}
+    localStorage.setItem(SSO_KEY, JSON.stringify({ t, exp: Date.now() + (Number(expiresIn) || 3600) * 1000, email, scope: DRIVE_SCOPE, client: GOOGLE_CLIENT_ID }));
+  }catch(e){}
+}
+function ssoClear(){ try{ localStorage.removeItem(SSO_KEY); }catch(e){} }
+function ssoRead(){
+  try{
+    const x = JSON.parse(localStorage.getItem(SSO_KEY) || 'null');
+    return (x && x.t && x.client === GOOGLE_CLIENT_ID && x.scope === DRIVE_SCOPE && x.exp > Date.now() + 60000) ? x : null;
+  }catch(e){ return null; }
+}
+
+/* Redirect sign-in: fallback for iPhone home-screen apps where the Google pop-up can't open.
+   Needs https://marvyeo.github.io/MCC-Inventory/ under "Authorized redirect URIs" on the OAuth client. */
+const REDIRECT_URI = location.origin + location.pathname;
+function startRedirectSignIn(){
+  const p = new URLSearchParams({ client_id: GOOGLE_CLIENT_ID, redirect_uri: REDIRECT_URI, response_type: 'token',
+    scope: DRIVE_SCOPE, include_granted_scopes: 'true', prompt: 'select_account', state: 'mcc' });
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + p.toString();
+}
+function consumeRedirectToken(){
+  if(!location.hash.includes('access_token=')) return false;
+  const h = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', REDIRECT_URI);
+  if(h.get('state') !== 'mcc' || !h.get('access_token')) return false;
+  const exp = Number(h.get('expires_in')) || 3600;
+  driveAccessToken = h.get('access_token');
+  driveTokenExpiresAt = Date.now() + exp*1000 - 60000;
+  saveTokenToLocalStorage(driveAccessToken, exp);
+  ssoPublish(driveAccessToken, exp);
+  hideAuthGate();
+  updateConnStatus(true);
+  startApp();
+  return true;
 }
 
 function updateConnStatus(ok){ setSyncStatus(ok ? 'ok' : 'error'); }
@@ -386,6 +448,7 @@ function initGoogleAuth(){
       driveAccessToken = resp.access_token;
       driveTokenExpiresAt = Date.now() + (resp.expires_in*1000) - 60000;
       saveTokenToLocalStorage(resp.access_token, resp.expires_in);
+      ssoPublish(resp.access_token, resp.expires_in);
       hideAuthGate();
       updateConnStatus(true);
       startApp();
@@ -399,16 +462,17 @@ function initGoogleAuth(){
     tokenClient.requestAccessToken({ prompt: driveAccessToken ? '' : 'consent' });
   });
   document.getElementById('sign-out-link').addEventListener('click', ()=>{
-    if(driveAccessToken){
-      google.accounts.oauth2.revoke(driveAccessToken, ()=>{});
-    }
+    // No revoke here: all apps share one OAuth client, and revoking would cancel the file grants for every app.
     driveAccessToken = null;
     clearStoredToken();
+    ssoClear();
     showAuthGate();
   });
 
-  // Try silent restore from a cached, still-valid token first.
-  const cached = loadTokenFromLocalStorage();
+  // Try silent restore: redirect result, then this app's cached token, then the shared Life Plan sign-in.
+  if(consumeRedirectToken()) return;
+  let cached = loadTokenFromLocalStorage();
+  if(!cached){ const x = ssoRead(); if(x) cached = { token: x.t, expiresAt: x.exp - 60000 }; }
   if(cached){
     driveAccessToken = cached.token;
     driveTokenExpiresAt = cached.expiresAt;
@@ -422,12 +486,15 @@ function initGoogleAuth(){
 
 async function ensureFreshToken(){
   if(driveAccessToken && Date.now() < driveTokenExpiresAt) return true;
+  const shared = ssoRead(); // another app may have already renewed the shared sign-in
+  if(shared){ driveAccessToken = shared.t; driveTokenExpiresAt = shared.exp - 60000; saveTokenToLocalStorage(shared.t, (shared.exp - Date.now())/1000); updateConnStatus(true); return true; }
   return new Promise((resolve)=>{
     tokenClient.callback = (resp)=>{
       if(resp.error){ updateConnStatus(false); resolve(false); return; }
       driveAccessToken = resp.access_token;
       driveTokenExpiresAt = Date.now() + (resp.expires_in*1000) - 60000;
       saveTokenToLocalStorage(resp.access_token, resp.expires_in);
+      ssoPublish(resp.access_token, resp.expires_in);
       updateConnStatus(true);
       resolve(true);
     };
@@ -2228,8 +2295,53 @@ function escapeHTML(str){
 function escapeAttr(str){ return escapeHTML(str); }
 
 /* ============================= INIT ============================= */
+/* One-time step after moving to the shared client: check the app can open its data files before loading.
+   If it can't, ask for the files with Google Picker. Never load as "empty": the next save could overwrite real data. */
+async function probeFileAccess(){
+  const ids = [DRIVE_FILE_ID_LOCATIONS, DRIVE_FILE_ID_ITEMS, DRIVE_FILE_ID_PHOTOS].filter(Boolean);
+  try{
+    for(const id of ids){
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=id`, { headers: { Authorization: `Bearer ${driveAccessToken}` } });
+      if(res.status === 401) return 'auth';
+      if(!res.ok) return 'missing';
+    }
+    return 'ok';
+  }catch(e){ return 'ok'; } // offline: loadData reports it the usual way
+}
+function showFileGate(){
+  if(document.getElementById('file-gate')) return;
+  const ov = document.createElement('div');
+  ov.id = 'file-gate';
+  ov.style.cssText = 'position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:210;padding:20px;';
+  ov.innerHTML = `<div class="auth-card"><div class="brand-mark">M</div><h1>One-time step</h1>
+    <p>MCC Inventory now signs in with the shared Life Plan login. Google needs you to pick the three data files once: <b>${DRIVE_FILE_LOCATIONS}</b>, <b>${DRIVE_FILE_ITEMS}</b> and <b>${DRIVE_FILE_PHOTOS}</b>. Nothing in them is changed. If the files were shared with you, look under "Shared with me".</p>
+    <button class="auth-btn" id="pick-files-btn">Pick the 3 files</button><div id="file-gate-msg"></div></div>`;
+  document.body.appendChild(ov);
+  document.getElementById('pick-files-btn').addEventListener('click', pickMccFiles);
+}
+function pickMccFiles(){
+  const open = ()=> gapi.load('picker', ()=>{
+    const mk = ()=> new google.picker.DocsView(google.picker.ViewId.DOCS).setMode(google.picker.DocsViewMode.LIST).setMimeTypes('application/json').setQuery('mcc-inventory');
+    new google.picker.PickerBuilder().addView(mk()).addView(mk().setOwnedByMe(false))
+      .enableFeature(google.picker.Feature.MULTISELECT_ENABLED).setTitle('Pick the 3 mcc-inventory files')
+      .setOAuthToken(driveAccessToken).setDeveloperKey(PICKER_API_KEY).setAppId(GCP_APP_ID)
+      .setCallback(d=>{
+        if(d.action !== google.picker.Action.PICKED) return;
+        const got = new Set(d.docs.map(x=>x.id));
+        const need = [[DRIVE_FILE_LOCATIONS, DRIVE_FILE_ID_LOCATIONS], [DRIVE_FILE_ITEMS, DRIVE_FILE_ID_ITEMS], [DRIVE_FILE_PHOTOS, DRIVE_FILE_ID_PHOTOS]].filter(x=>x[1] && !got.has(x[1])).map(x=>x[0]);
+        if(need.length){ document.getElementById('file-gate-msg').innerHTML = `<div class="auth-error">Still missing: ${escapeHTML(need.join(', '))}. Pick all three together.</div>`; return; }
+        const g = document.getElementById('file-gate'); if(g) g.remove();
+        startApp();
+      }).build().setVisible(true);
+  });
+  if(window.gapi && window.gapi.load) open();
+  else { const sc = document.createElement('script'); sc.src = 'https://apis.google.com/js/api.js'; sc.onload = open; document.head.appendChild(sc); }
+}
 async function startApp(){
   document.getElementById('main').innerHTML = `<div class="empty" style="margin-top:60px;"><h3>Loading your inventory...</h3></div>`;
+  const access = await probeFileAccess();
+  if(access === 'auth'){ driveAccessToken = null; clearStoredToken(); ssoClear(); showAuthGate('Your sign-in expired. Connect Google Drive again.'); return; }
+  if(access === 'missing'){ showFileGate(); return; }
   await loadData();
   setActiveNav();
   renderMain();
@@ -2294,6 +2406,13 @@ function waitForGoogleLib(cb){
   setTimeout(()=> waitForGoogleLib(cb), 100);
 }
 waitForGoogleLib(initGoogleAuth);
+(function(){
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const hint = document.getElementById('ios-hint');
+  if(hint && ios && !standalone) hint.style.display = 'block';
+})();
 </script>
 <script>
 // Installable app: register the service worker (only on https, i.e. GitHub Pages)
