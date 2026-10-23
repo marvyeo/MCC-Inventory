@@ -2314,10 +2314,23 @@ function showFileGate(){
   ov.id = 'file-gate';
   ov.style.cssText = 'position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:210;padding:20px;';
   ov.innerHTML = `<div class="auth-card"><div class="brand-mark">M</div><h1>One-time step</h1>
-    <p>MCC Inventory now signs in with the shared Life Plan login. Google needs you to pick the three data files once: <b>${DRIVE_FILE_LOCATIONS}</b>, <b>${DRIVE_FILE_ITEMS}</b> and <b>${DRIVE_FILE_PHOTOS}</b>. Nothing in them is changed. If the files were shared with you, look under "Shared with me".</p>
+    <p>MCC Inventory now signs in with the shared Life Plan login. Google needs you to pick the three data files once: <b>${DRIVE_FILE_LOCATIONS}</b>, <b>${DRIVE_FILE_ITEMS}</b> and <b>${DRIVE_FILE_PHOTOS}</b>. Nothing in them is changed. If the files were shared with you, look under "Shared with me". If picking all three at once doesn't work, pick them one at a time: the app remembers each one.</p>
     <button class="auth-btn" id="pick-files-btn">Pick the 3 files</button><div id="file-gate-msg"></div></div>`;
   document.body.appendChild(ov);
   document.getElementById('pick-files-btn').addEventListener('click', pickMccFiles);
+}
+// Names of the data files this sign-in still can't open (null if the sign-in itself has expired).
+async function missingMccFiles(){
+  const files = [[DRIVE_FILE_LOCATIONS, DRIVE_FILE_ID_LOCATIONS], [DRIVE_FILE_ITEMS, DRIVE_FILE_ID_ITEMS], [DRIVE_FILE_PHOTOS, DRIVE_FILE_ID_PHOTOS]].filter(x=>x[1]);
+  const missing = [];
+  for(const [name, id] of files){
+    try{
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=id`, { headers: { Authorization: `Bearer ${driveAccessToken}` } });
+      if(res.status === 401) return null;
+      if(!res.ok) missing.push(name);
+    }catch(e){ missing.push(name); }
+  }
+  return missing;
 }
 function pickMccFiles(){
   const open = ()=> gapi.load('picker', ()=>{
@@ -2327,11 +2340,18 @@ function pickMccFiles(){
       .setOAuthToken(driveAccessToken).setDeveloperKey(PICKER_API_KEY).setAppId(GCP_APP_ID)
       .setCallback(d=>{
         if(d.action !== google.picker.Action.PICKED) return;
-        const got = new Set(d.docs.map(x=>x.id));
-        const need = [[DRIVE_FILE_LOCATIONS, DRIVE_FILE_ID_LOCATIONS], [DRIVE_FILE_ITEMS, DRIVE_FILE_ID_ITEMS], [DRIVE_FILE_PHOTOS, DRIVE_FILE_ID_PHOTOS]].filter(x=>x[1] && !got.has(x[1])).map(x=>x[0]);
-        if(need.length){ document.getElementById('file-gate-msg').innerHTML = `<div class="auth-error">Still missing: ${escapeHTML(need.join(', '))}. Pick all three together.</div>`; return; }
-        const g = document.getElementById('file-gate'); if(g) g.remove();
-        startApp();
+        // Each pick is remembered by Google, so files can be picked one at a time or together: re-check what is still missing.
+        missingMccFiles().then(need=>{
+          const msg = document.getElementById('file-gate-msg'), btn = document.getElementById('pick-files-btn');
+          if(need === null){ if(msg) msg.innerHTML = `<div class="auth-error">Your sign-in expired. Reload and connect again.</div>`; return; }
+          if(need.length){
+            if(msg) msg.innerHTML = `<div class="auth-error">Still missing: ${escapeHTML(need.join(', '))}. Tap the button and pick ${need.length === 1 ? 'it' : 'them'}.</div>`;
+            if(btn) btn.textContent = 'Pick the remaining ' + (need.length === 1 ? 'file' : need.length + ' files');
+            return;
+          }
+          const g = document.getElementById('file-gate'); if(g) g.remove();
+          startApp();
+        });
       }).build().setVisible(true);
   });
   if(window.gapi && window.gapi.load) open();

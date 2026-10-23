@@ -204,3 +204,4 @@ It maps normalized receipt text to an item ID. Entries are added only when a lin
 - **2026-10-18:** latency update (background saves, photos split out); Receipt Reader published.
 - **ver 2 (2026-10-22):** moved into the repo as `PROJECT_STATE.md`; added Session Rules; recorded installability and the manifest id fix.
 - **2026-10-23 (conductor, Sprints 13.4 + 13.3 + 13.2):** shared OAuth client + `drive.file` with a one-time file-pick gate, shared `lp-sso` sign-in, no token revoke on Disconnect, iOS redirect fallback and hint, "← Life Plan" link, safe areas, theme tokens; `sw.js` cache `mccinventory-v3`. Not tested live.
+- **2026-10-23 (conductor, later):** the "Pick the 3 files" gate now works one file at a time (Caroline couldn't multi-select the shared files). Each pick is remembered by Google, so after every pick the app re-checks which files are still unopenable, says which are left, and loads when all three work.
